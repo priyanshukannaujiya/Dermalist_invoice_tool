@@ -5,6 +5,7 @@ Main Streamlit Application
 
 import os
 import io
+import re
 from datetime import datetime
 import streamlit as st
 import pandas as pd
@@ -704,6 +705,7 @@ elif page == "💬 Create Invoice":
 
         dl_col1, dl_col2 = st.columns(2)
         excel_path = last_inv.get("excel_path")
+        pdf_path = last_inv.get("pdf_path")
         clean_name = re.sub(r'[^a-zA-Z0-9_-]', '_', last_inv.get('creator_name', 'Creator')).strip('_')
         inv_num = last_inv.get('invoice_number', '001')
         excel_filename = f"{clean_name}_Invoice_{inv_num}.xlsx"
