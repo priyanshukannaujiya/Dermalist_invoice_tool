@@ -80,8 +80,13 @@ class PDFService:
         Uses LibreOffice headless if installed, otherwise uses ReportLab engine.
         Returns the absolute filepath of the generated PDF.
         """
+        import re
         inv_num = invoice_data.get("invoice_number", "INV-001").replace("/", "_").replace("\\", "_")
-        pdf_filename = f"Invoice_{inv_num}.pdf"
+        creator_name = (creator_data.get("name") or invoice_data.get("creator_name") or "Creator").strip()
+        clean_name = re.sub(r'[^a-zA-Z0-9_-]', '_', creator_name).strip('_')
+        if not clean_name:
+            clean_name = "Creator"
+        pdf_filename = f"{clean_name}_Invoice_{inv_num}.pdf"
         target_pdf_path = os.path.abspath(os.path.join(self.output_dir, pdf_filename))
 
         # 1. Try LibreOffice if excel_path provided

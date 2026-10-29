@@ -50,13 +50,19 @@ class ExcelService:
         if not self.verify_template():
             raise FileNotFoundError(f"Master Excel template not found at '{self.template_path}'")
 
+        import re
         inv_num = invoice_data.get("invoice_number", "INV-001").replace("/", "_").replace("\\", "_")
+        creator_name = (creator_data.get("name") or invoice_data.get("creator_name") or "Creator").strip()
+        clean_name = re.sub(r'[^a-zA-Z0-9_-]', '_', creator_name).strip('_')
+        if not clean_name:
+            clean_name = "Creator"
+
         if not output_filename:
-            output_filename = f"Invoice_{inv_num}.xlsx"
+            output_filename = f"{clean_name}_Invoice_{inv_num}.xlsx"
 
         output_path = os.path.join(self.output_dir, output_filename)
 
-        # Load master workbook (data_only=False preserves formulas)
+        # Load master workbook (data_only=False preserves template styles and formats)
         wb = openpyxl.load_workbook(self.template_path, data_only=False)
         ws = wb.active
 
@@ -67,12 +73,8 @@ class ExcelService:
         creator_phone = creator_data.get("phone", "")
         creator_pan = creator_data.get("pan", "")
 
-        if creator_name:
-            ws["B2"].value = creator_name
-
-        if creator_address:
-            ws["B3"].value = creator_address
-
+        ws["B2"].value = creator_name or "Creator Name"
+        ws["B3"].value = creator_address or ""
         ws["B5"].value = f"Email ID: {creator_email}" if creator_email else "Email ID:"
         ws["B6"].value = f"Contact Number: {creator_phone}" if creator_phone else "Contact Number"
         ws["B7"].value = f"Pan Number : {creator_pan}" if creator_pan else "Pan Number : "

@@ -697,9 +697,10 @@ elif page == "💬 Create Invoice":
 
         dl_col1, dl_col2 = st.columns(2)
         excel_path = last_inv.get("excel_path")
-        pdf_path = last_inv.get("pdf_path")
-        excel_filename = f"Invoice_{last_inv['invoice_number']}_Dermalist.xlsx"
-        pdf_filename = f"Invoice_{last_inv['invoice_number']}_Dermalist.pdf"
+        clean_name = re.sub(r'[^a-zA-Z0-9_-]', '_', last_inv.get('creator_name', 'Creator')).strip('_')
+        inv_num = last_inv.get('invoice_number', '001')
+        excel_filename = f"{clean_name}_Invoice_{inv_num}.xlsx"
+        pdf_filename = f"{clean_name}_Invoice_{inv_num}.pdf"
 
         with dl_col1:
             if excel_path and os.path.exists(excel_path):
@@ -922,15 +923,17 @@ elif page == "📜 Invoice History":
                 st.markdown("---")
                 # Download buttons for previously generated files
                 d_col1, d_col2 = st.columns(2)
+                hist_creator = re.sub(r'[^a-zA-Z0-9_-]', '_', inv.get('creator_name', 'Creator')).strip('_')
+                hist_inv_no = inv.get('invoice_number', '001')
                 with d_col1:
                     if inv.get("excel_path") and os.path.exists(inv["excel_path"]):
-                        render_excel_download_button(inv["excel_path"], f"Invoice_{inv['invoice_number']}_Dermalist.xlsx")
+                        render_excel_download_button(inv["excel_path"], f"{hist_creator}_Invoice_{hist_inv_no}.xlsx")
                     else:
                         st.caption("Excel file not found on disk.")
 
                 with d_col2:
                     if inv.get("pdf_path") and os.path.exists(inv["pdf_path"]):
-                        render_pdf_download_button(inv["pdf_path"], f"Invoice_{inv['invoice_number']}_Dermalist.pdf")
+                        render_pdf_download_button(inv["pdf_path"], f"{hist_creator}_Invoice_{hist_inv_no}.pdf")
                     else:
                         st.caption("PDF file not found on disk.")
     else:
