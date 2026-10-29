@@ -264,3 +264,51 @@ def test_delete_creator_with_invoices_fails():
         database.delete_creator(creator["id"], db_path=TEST_DB_PATH)
     assert "associated invoices" in str(exc.value)
 
+
+def test_unique_creator_invoice_generation():
+    """Verify that generating an invoice for a new unique creator writes their unique details, not default/Aaditi."""
+    excel_svc = ExcelService(output_dir=TEST_OUTPUT_DIR)
+    pdf_svc = PDFService(output_dir=TEST_OUTPUT_DIR)
+    inv_svc = InvoiceService(excel_service=excel_svc, pdf_service=pdf_svc, db_path=TEST_DB_PATH)
+
+    unique_invoice_data = {
+        "invoice_number": "DL-UNIQUE-007",
+        "creator_name": "Kunal Kapoor",
+        "invoice_date": "30-10-2026",
+        "service_description": "Custom Skincare Ad",
+        "quantity": 1,
+        "unit_price": 7500.0,
+        "taxable_value": 7500.0,
+        "discount": 500.0,
+        "subtotal_less_discount": 7000.0,
+        "balance_due": 7000.0,
+        "status": "Generated",
+    }
+    unique_creator_data = {
+        "name": "Kunal Kapoor",
+        "address": "902 Silver Oak, Bandra, Mumbai 400050",
+        "email": "kunal@kapoor.com",
+        "phone": "+91 99999 11111",
+        "pan": "KUNAL1234K",
+        "upi_id": "kunal@kotak",
+        "bank_account": "987654321012",
+        "ifsc": "KKBK0000123",
+        "account_holder": "Kunal Kapoor",
+        "bank_name": "Kotak Mahindra Bank",
+    }
+
+    result = inv_svc.generate_and_save_invoice(unique_invoice_data, unique_creator_data)
+
+    # Check Excel file content
+    wb = openpyxl.load_workbook(result["excel_path"], data_only=False)
+    ws = wb.active
+
+    assert ws["B2"].value == "Kunal Kapoor"
+    assert "Bandra" in ws["B3"].value
+    assert "KUNAL1234K" in ws["B7"].value
+    assert "kunal@kotak" in ws["B32"].value
+    assert "987654321012" in ws["B33"].value
+    assert "KKBK0000123" in ws["B34"].value
+    assert "Aaditi" not in str(ws["B2"].value)
+    wb.close()
+

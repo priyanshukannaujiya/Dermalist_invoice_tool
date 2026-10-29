@@ -17,9 +17,10 @@ from services.validation import calculate_invoice_totals, normalize_date, valida
 
 
 class InvoiceService:
-    def __init__(self, excel_service: Optional[ExcelService] = None, pdf_service: Optional[PDFService] = None):
+    def __init__(self, excel_service: Optional[ExcelService] = None, pdf_service: Optional[PDFService] = None, db_path: Optional[str] = None):
         self.excel_service = excel_service or ExcelService()
         self.pdf_service = pdf_service or PDFService()
+        self.db_path = db_path
 
     def prepare_invoice_draft(self, extracted: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -30,7 +31,7 @@ class InvoiceService:
         creator_name = extracted.get("creator_name", "")
         creator = None
         if creator_name:
-            creator = database.find_creator_by_name(creator_name)
+            creator = database.find_creator_by_name(creator_name, db_path=self.db_path)
 
         # Date normalization
         raw_date = extracted.get("invoice_date")
@@ -43,7 +44,7 @@ class InvoiceService:
         totals = calculate_invoice_totals(unit_price, quantity, discount)
 
         # Next sequential invoice number
-        next_inv_no = database.get_next_invoice_number()
+        next_inv_no = database.get_next_invoice_number(db_path=self.db_path)
 
         draft = {
             "invoice_number": next_inv_no,
@@ -75,29 +76,34 @@ class InvoiceService:
         2. Prevent duplicate invoice numbers
         3. Create Excel from template
         4. Create PDF with fallback
-        5. Persist record in SQLite
+        5. Persist record in PostgreSQL / SQLite
         """
         is_valid, errors = validate_invoice_payload(invoice_data)
         if not is_valid:
             raise ValueError("; ".join(errors))
 
         inv_number = invoice_data["invoice_number"].strip()
-        if database.check_invoice_number_exists(inv_number):
+        if database.check_invoice_number_exists(inv_number, db_path=self.db_path):
             raise ValueError(f"Invoice number '{inv_number}' already exists in database.")
 
-        # Ensure creator_id is linked or create creator if needed
+        # Ensure creator_id is linked or create/update creator profile
+        creator_name = invoice_data["creator_name"].strip()
         creator_id = invoice_data.get("creator_id")
         if not creator_id:
-            # Check if creator exists by name
-            existing = database.find_creator_by_name(invoice_data["creator_name"])
-            if existing:
+            # Check for exact case-insensitive match only
+            existing = database.find_creator_by_name(creator_name, db_path=self.db_path)
+            if existing and existing["name"].strip().lower() == creator_name.lower():
                 creator_id = existing["id"]
-                creator_data = existing
+                # Update any newly provided details
+                updated_profile = dict(existing)
+                updated_profile.update({k: v for k, v in creator_data.items() if v})
+                database.update_creator(creator_id, updated_profile, db_path=self.db_path)
+                creator_data = updated_profile
             else:
-                # Create a minimal creator profile
+                # Create a new unique creator profile
                 new_creator_id = database.create_creator(
                     {
-                        "name": invoice_data["creator_name"],
+                        "name": creator_name,
                         "address": creator_data.get("address", "Creator Address"),
                         "email": creator_data.get("email", ""),
                         "phone": creator_data.get("phone", ""),
@@ -105,14 +111,16 @@ class InvoiceService:
                         "upi_id": creator_data.get("upi_id", ""),
                         "bank_account": creator_data.get("bank_account", ""),
                         "ifsc": creator_data.get("ifsc", ""),
-                        "account_holder": creator_data.get("account_holder", invoice_data["creator_name"]),
+                        "account_holder": creator_data.get("account_holder", creator_name),
                         "bank_name": creator_data.get("bank_name", ""),
-                    }
+                    },
+                    db_path=self.db_path,
                 )
                 creator_id = new_creator_id
                 creator_data["id"] = new_creator_id
 
         invoice_data["creator_id"] = creator_id
+        creator_data["name"] = creator_name
 
         # 1. Generate Excel workbook
         excel_path = self.excel_service.generate_invoice_excel(
@@ -130,8 +138,8 @@ class InvoiceService:
         invoice_data["excel_path"] = excel_path
         invoice_data["pdf_path"] = pdf_path
 
-        # 3. Save into SQLite
-        db_id = database.create_invoice(invoice_data)
+        # 3. Save into Database
+        db_id = database.create_invoice(invoice_data, db_path=self.db_path)
         invoice_data["id"] = db_id
 
         return invoice_data

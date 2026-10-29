@@ -543,38 +543,66 @@ elif page == "💬 Create Invoice":
                 with col_inv2:
                     inv_date = st.text_input("Invoice Date", value=draft["invoice_date"])
                 with col_inv3:
-                    # Select creator from existing or keep matched
-                    all_creators = database.get_creators()
-                    creator_names = [c["name"] for c in all_creators]
+                    prompt_creator_name = draft.get("creator_name") or ""
+                    creator_name_input = st.text_input("Creator Name *", value=prompt_creator_name)
 
-                    current_idx = 0
-                    if draft.get("creator_name") in creator_names:
-                        current_idx = creator_names.index(draft["creator_name"])
+                # Check if prompt matches an existing saved creator in DB
+                all_creators = database.get_creators()
+                matched_creator = None
+                default_sel_idx = 0
+                if creator_name_input.strip():
+                    matched = database.find_creator_by_name(creator_name_input.strip())
+                    if matched and matched["name"].strip().lower() == creator_name_input.strip().lower():
+                        matched_creator = matched
+                        for idx, c in enumerate(all_creators):
+                            if c["id"] == matched["id"]:
+                                default_sel_idx = idx + 1
+                                break
 
-                    selected_creator_name = st.selectbox(
-                        "Creator Profile",
-                        options=creator_names,
-                        index=current_idx if creator_names else 0,
+                profile_options = ["-- Enter Unique / New Creator --"] + [f"👤 {c['name']}" for c in all_creators]
+                col_sel_prof, col_sel_note = st.columns([2, 3])
+                with col_sel_prof:
+                    selected_profile_label = st.selectbox(
+                        "Auto-fill Details from Saved Profile (Optional):",
+                        options=profile_options,
+                        index=default_sel_idx,
+                        help="Choose a saved creator to auto-fill their PAN and bank details, or keep 'Enter Unique' to supply custom data.",
                     )
+                with col_sel_note:
+                    st.markdown("<div style='height: 25px;'></div>", unsafe_allow_html=True)
+                    if selected_profile_label != "-- Enter Unique / New Creator --":
+                        st.caption("✅ Auto-filled from saved database profile.")
+                    else:
+                        st.caption("🆕 Unique / New creator data will be saved with this invoice.")
 
-                # Fetch chosen creator's profile
-                chosen_creator = database.find_creator_by_name(selected_creator_name) or {}
+                # Determine base creator data to populate fields
+                base_data = {}
+                linked_creator_id = None
+                if selected_profile_label != "-- Enter Unique / New Creator --":
+                    for c in all_creators:
+                        if f"👤 {c['name']}" == selected_profile_label:
+                            base_data = dict(c)
+                            linked_creator_id = c["id"]
+                            break
+                elif matched_creator:
+                    base_data = dict(matched_creator)
+                    linked_creator_id = matched_creator["id"]
 
-                # Display creator info card (sensitive info retrieved securely from DB)
-                with st.expander("👤 Creator Details (Retrieved from Database)", expanded=True):
+                # Editable Creator & Banking Details
+                with st.expander("👤 Creator Details & Banking Information (Editable)", expanded=True):
                     c_col1, c_col2, c_col3 = st.columns(3)
                     with c_col1:
-                        st.markdown(f"**Name:** {chosen_creator.get('name', 'N/A')}")
-                        st.markdown(f"**PAN:** `{chosen_creator.get('pan', 'N/A')}`")
-                        st.markdown(f"**Contact:** {chosen_creator.get('phone', 'N/A')}")
+                        c_address = st.text_input("Address *", value=base_data.get("address") or "Creator Address, India")
+                        c_phone = st.text_input("Contact Phone", value=base_data.get("phone") or "")
+                        c_email = st.text_input("Email ID", value=base_data.get("email") or "")
                     with c_col2:
-                        st.markdown(f"**Email:** {chosen_creator.get('email', 'N/A')}")
-                        st.markdown(f"**UPI ID:** `{chosen_creator.get('upi_id', 'N/A')}`")
-                        st.markdown(f"**Bank:** {chosen_creator.get('bank_name', 'N/A')}")
+                        c_pan = st.text_input("PAN Number", value=base_data.get("pan") or "").upper()
+                        c_upi = st.text_input("UPI ID", value=base_data.get("upi_id") or "")
+                        c_bank_name = st.text_input("Bank Name", value=base_data.get("bank_name") or "")
                     with c_col3:
-                        st.markdown(f"**Account No:** `{chosen_creator.get('bank_account', 'N/A')}`")
-                        st.markdown(f"**IFSC:** `{chosen_creator.get('ifsc', 'N/A')}`")
-                        st.markdown(f"**Holder:** {chosen_creator.get('account_holder', 'N/A')}")
+                        c_bank_acc = st.text_input("Bank Account Number", value=base_data.get("bank_account") or "")
+                        c_ifsc = st.text_input("IFSC Code", value=base_data.get("ifsc") or "").upper()
+                        c_holder = st.text_input("Account Holder Name", value=base_data.get("account_holder") or creator_name_input.strip())
 
                 st.markdown("##### 2. Service & Line Items")
                 col_srv1, col_srv2 = st.columns([3, 1])
@@ -612,11 +640,26 @@ elif page == "💬 Create Invoice":
                 )
 
                 if generate_btn:
-                    with st.spinner("Generating invoice workbook and PDF..."):
+                    with st.spinner("Generating invoice workbook and PDF with unique creator data..."):
+                        final_creator_name = creator_name_input.strip() or "Creator Name"
+                        chosen_creator_payload = {
+                            "id": linked_creator_id,
+                            "name": final_creator_name,
+                            "address": c_address.strip(),
+                            "email": c_email.strip(),
+                            "phone": c_phone.strip(),
+                            "pan": c_pan.strip(),
+                            "upi_id": c_upi.strip(),
+                            "bank_account": c_bank_acc.strip(),
+                            "ifsc": c_ifsc.strip(),
+                            "account_holder": c_holder.strip() or final_creator_name,
+                            "bank_name": c_bank_name.strip(),
+                        }
+
                         final_invoice_data = {
                             "invoice_number": inv_number,
-                            "creator_id": chosen_creator.get("id"),
-                            "creator_name": selected_creator_name,
+                            "creator_id": linked_creator_id,
+                            "creator_name": final_creator_name,
                             "invoice_date": inv_date,
                             "service_description": srv_desc,
                             "quantity": computed["quantity"],
@@ -632,11 +675,11 @@ elif page == "💬 Create Invoice":
                         try:
                             generated = invoice_service.generate_and_save_invoice(
                                 invoice_data=final_invoice_data,
-                                creator_data=chosen_creator,
+                                creator_data=chosen_creator_payload,
                             )
                             st.session_state.last_generated_invoice = generated
                             st.session_state.pending_draft = None
-                            st.success(f"🎉 Invoice {inv_number} successfully generated!")
+                            st.success(f"🎉 Invoice {inv_number} successfully generated for {final_creator_name}!")
                             st.rerun()
                         except Exception as e:
                             st.error(f"Error generating invoice: {str(e)}")
