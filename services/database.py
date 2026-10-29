@@ -22,8 +22,49 @@ def is_postgres_configured() -> bool:
     return bool(DATABASE_URL and (DATABASE_URL.startswith("postgres://") or DATABASE_URL.startswith("postgresql://")))
 
 
+_PG_POOL = None
+_CACHED_DB_TYPE = None
+
+
+def get_pg_pool():
+    """Get or initialize ThreadedConnectionPool for fast connection reuse."""
+    global _PG_POOL
+    if _PG_POOL is None and is_postgres_configured():
+        try:
+            import psycopg2.pool
+            from psycopg2.extras import RealDictCursor
+
+            clean_url = os.getenv("DATABASE_URL", "").strip()
+            if "channel_binding=" in clean_url:
+                clean_url = clean_url.replace("&channel_binding=require", "").replace("channel_binding=require&", "").replace("?channel_binding=require", "")
+                if clean_url.endswith("?"):
+                    clean_url = clean_url[:-1]
+
+            _PG_POOL = psycopg2.pool.ThreadedConnectionPool(
+                minconn=1,
+                maxconn=10,
+                dsn=clean_url,
+                connect_timeout=8,
+                cursor_factory=RealDictCursor,
+            )
+        except Exception:
+            _PG_POOL = None
+    return _PG_POOL
+
+
 def get_pg_connection():
-    """Get a PostgreSQL connection with RealDictCursor and 10s timeout (for Neon cold starts)."""
+    """Get a PostgreSQL connection from the pool for instant reuse (or create new if pool exhausted)."""
+    pool = get_pg_pool()
+    if pool:
+        try:
+            conn = pool.getconn()
+            if conn.closed:
+                pool.putconn(conn, close=True)
+                conn = pool.getconn()
+            return conn, pool
+        except Exception:
+            pass
+
     import psycopg2
     from psycopg2.extras import RealDictCursor
 
@@ -33,9 +74,8 @@ def get_pg_connection():
         if clean_url.endswith("?"):
             clean_url = clean_url[:-1]
 
-    # Neon serverless compute can take 2-5s to wake from suspension, so 10s timeout is safe
-    conn = psycopg2.connect(clean_url, connect_timeout=10, cursor_factory=RealDictCursor)
-    return conn
+    conn = psycopg2.connect(clean_url, connect_timeout=8, cursor_factory=RealDictCursor)
+    return conn, None
 
 
 def get_sqlite_connection(db_path: Optional[str] = None) -> sqlite3.Connection:
@@ -48,15 +88,25 @@ def get_sqlite_connection(db_path: Optional[str] = None) -> sqlite3.Connection:
 
 
 def get_db_type() -> str:
-    """Return active database engine name."""
+    """Return active database engine name with caching."""
+    global _CACHED_DB_TYPE
+    if _CACHED_DB_TYPE:
+        return _CACHED_DB_TYPE
+
     if is_postgres_configured():
         try:
-            conn = get_pg_connection()
-            conn.close()
-            return "Neon PostgreSQL"
+            conn, pool = get_pg_connection()
+            if pool:
+                pool.putconn(conn)
+            else:
+                conn.close()
+            _CACHED_DB_TYPE = "Neon PostgreSQL"
+            return _CACHED_DB_TYPE
         except Exception:
-            return "SQLite (Fallback)"
-    return "SQLite (Local)"
+            _CACHED_DB_TYPE = "SQLite (Fallback)"
+            return _CACHED_DB_TYPE
+    _CACHED_DB_TYPE = "SQLite (Local)"
+    return _CACHED_DB_TYPE
 
 
 def _sanitize_row(row_dict: Dict[str, Any]) -> Dict[str, Any]:
@@ -73,9 +123,12 @@ def _sanitize_row(row_dict: Dict[str, Any]) -> Dict[str, Any]:
     return clean
 
 
+_DB_INITIALIZED = False
+
+
 def execute_query(query: str, params: tuple = (), fetch_one: bool = False, fetch_all: bool = False, is_insert: bool = False, db_path: Optional[str] = None) -> Any:
     """
-    Execute SQL query across either Neon PostgreSQL or SQLite.
+    Execute SQL query across either Neon PostgreSQL (using fast connection pool) or SQLite.
     Automatically translates parameter placeholders (? vs %s) and handles return values.
     Includes 1 retry attempt for PostgreSQL transient cold-start drops.
     """
@@ -83,8 +136,10 @@ def execute_query(query: str, params: tuple = (), fetch_one: bool = False, fetch
 
     if use_pg:
         for attempt in range(2):
+            conn = None
+            pool = None
             try:
-                conn = get_pg_connection()
+                conn, pool = get_pg_connection()
                 try:
                     with conn.cursor() as cur:
                         pg_query = query.replace("?", "%s")
@@ -103,11 +158,20 @@ def execute_query(query: str, params: tuple = (), fetch_one: bool = False, fetch
                             return ret["id"] if ret else None
                         return cur.rowcount
                 finally:
-                    conn.close()
+                    if pool and conn:
+                        pool.putconn(conn)
+                    elif conn:
+                        conn.close()
             except Exception as e:
+                if pool and conn:
+                    try:
+                        pool.putconn(conn, close=True)
+                    except Exception:
+                        pass
+                    conn = None
                 if attempt == 0:
                     import time
-                    time.sleep(1.0)
+                    time.sleep(0.3)
                     continue
                 # If retry also fails, fall back to SQLite
                 break
@@ -132,13 +196,19 @@ def execute_query(query: str, params: tuple = (), fetch_one: bool = False, fetch
         conn.close()
 
 
-def init_db(db_path: Optional[str] = None) -> None:
+def init_db(db_path: Optional[str] = None, force: bool = False) -> None:
     """Initialize database tables for PostgreSQL and SQLite fallback to guarantee zero glitches."""
+    global _DB_INITIALIZED
+    if _DB_INITIALIZED and not force and db_path is None:
+        return
+
     use_pg = is_postgres_configured() and db_path is None
 
     if use_pg:
+        conn = None
+        pool = None
         try:
-            conn = get_pg_connection()
+            conn, pool = get_pg_connection()
             try:
                 with conn.cursor() as cur:
                     cur.execute(
@@ -186,7 +256,10 @@ def init_db(db_path: Optional[str] = None) -> None:
                     )
                     conn.commit()
             finally:
-                conn.close()
+                if pool and conn:
+                    pool.putconn(conn)
+                elif conn:
+                    conn.close()
             seed_initial_data(use_pg=True)
         except Exception:
             pass
@@ -242,6 +315,8 @@ def init_db(db_path: Optional[str] = None) -> None:
         conn.commit()
 
     seed_initial_data(db_path=db_path)
+    if db_path is None:
+        _DB_INITIALIZED = True
 
 
 def seed_initial_data(db_path: Optional[str] = None, use_pg: bool = False) -> None:
@@ -562,9 +637,10 @@ def get_invoices(
     search_query: Optional[str] = None,
     creator_id: Optional[int] = None,
     status: Optional[str] = None,
+    limit: Optional[int] = None,
     db_path: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    """Retrieve invoices with optional filters."""
+    """Retrieve invoices with optional filters and limit."""
     query = "SELECT * FROM invoices WHERE 1=1"
     params: List[Any] = []
 
@@ -582,6 +658,9 @@ def get_invoices(
         params.append(status)
 
     query += " ORDER BY id DESC"
+
+    if limit and limit > 0:
+        query += f" LIMIT {int(limit)}"
 
     rows = execute_query(query, tuple(params), fetch_all=True, db_path=db_path) or []
     # Ensure float conversion for numeric fields from postgres
@@ -616,51 +695,40 @@ def get_invoice_by_number(invoice_number: str, db_path: Optional[str] = None) ->
 
 
 def get_dashboard_metrics(db_path: Optional[str] = None) -> Dict[str, Any]:
-    """Calculate aggregate summary stats for the dashboard cards."""
-    # Total invoices count
-    r1 = execute_query("SELECT COUNT(*) as count FROM invoices", fetch_one=True, db_path=db_path)
-    total_invoices = int(r1["count"]) if r1 else 0
-
-    # Current month invoices
+    """Calculate aggregate summary stats for the dashboard cards in a single ultra-fast query."""
     current_year_month = datetime.now().strftime("%Y-%m")
     current_month_alt = datetime.now().strftime("%m-%Y")
-    r2 = execute_query(
-        """
-        SELECT COUNT(*) as count FROM invoices 
-        WHERE invoice_date LIKE ? OR invoice_date LIKE ? OR created_at LIKE ?
-        """,
+
+    query = """
+    SELECT 
+        (SELECT COUNT(*) FROM invoices) AS total_invoices,
+        (SELECT COUNT(*) FROM invoices WHERE invoice_date LIKE ? OR invoice_date LIKE ? OR created_at LIKE ?) AS monthly_invoices,
+        (SELECT COALESCE(SUM(balance_due), 0.0) FROM invoices) AS total_billed,
+        (SELECT COALESCE(SUM(balance_due), 0.0) FROM invoices WHERE status != 'Paid') AS pending_total,
+        (SELECT COUNT(*) FROM invoices WHERE status != 'Paid') AS pending_count,
+        (SELECT COUNT(*) FROM creators) AS total_creators
+    """
+    row = execute_query(
+        query,
         (f"%{current_year_month}%", f"%{current_month_alt}%", f"{current_year_month}%"),
         fetch_one=True,
         db_path=db_path,
     )
-    monthly_invoices = int(r2["count"]) if r2 else 0
-
-    # Total billed amount
-    r3 = execute_query("SELECT COALESCE(SUM(balance_due), 0.0) as total FROM invoices", fetch_one=True, db_path=db_path)
-    total_billed = float(r3["total"]) if r3 and r3["total"] else 0.0
-
-    # Pending payments (status != 'Paid')
-    r4 = execute_query(
-        """
-        SELECT COALESCE(SUM(balance_due), 0.0) as pending_total,
-               COUNT(*) as pending_count
-        FROM invoices WHERE status != 'Paid'
-        """,
-        fetch_one=True,
-        db_path=db_path,
-    )
-    pending_total = float(r4["pending_total"]) if r4 and r4["pending_total"] else 0.0
-    pending_count = int(r4["pending_count"]) if r4 and r4["pending_count"] else 0
-
-    # Creators count
-    r5 = execute_query("SELECT COUNT(*) as count FROM creators", fetch_one=True, db_path=db_path)
-    total_creators = int(r5["count"]) if r5 else 0
+    if row:
+        return {
+            "total_invoices": int(row.get("total_invoices") or 0),
+            "monthly_invoices": int(row.get("monthly_invoices") or 0),
+            "total_billed": float(row.get("total_billed") or 0.0),
+            "pending_total": float(row.get("pending_total") or 0.0),
+            "pending_count": int(row.get("pending_count") or 0),
+            "total_creators": int(row.get("total_creators") or 0),
+        }
 
     return {
-        "total_invoices": total_invoices,
-        "monthly_invoices": monthly_invoices,
-        "total_billed": total_billed,
-        "pending_total": pending_total,
-        "pending_count": pending_count,
-        "total_creators": total_creators,
+        "total_invoices": 0,
+        "monthly_invoices": 0,
+        "total_billed": 0.0,
+        "pending_total": 0.0,
+        "pending_count": 0,
+        "total_creators": 0,
     }

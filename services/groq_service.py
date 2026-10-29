@@ -14,11 +14,12 @@ from groq import Groq
 load_dotenv()
 
 FALLBACK_MODELS = [
-    "llama-3.3-70b-versatile",
+    "qwen/qwen3.8-27b",
     "openai/gpt-oss-120b",
     "openai/gpt-oss-20b",
-    "qwen/qwen3.8-27b",
 ]
+
+_CACHED_GROQ_CLIENT = None
 
 SYSTEM_PROMPT = """
 You are an expert AI Invoice Assistant specialized in extracting invoice details for creators and influencers.
@@ -49,9 +50,15 @@ Rules:
 
 class GroqService:
     def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None):
+        global _CACHED_GROQ_CLIENT
         self.api_key = api_key or os.getenv("GROQ_API_KEY", "")
-        self.primary_model = model or os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
-        self.client = Groq(api_key=self.api_key) if self.api_key else None
+        self.primary_model = model or os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b")
+        if self.api_key:
+            if _CACHED_GROQ_CLIENT is None:
+                _CACHED_GROQ_CLIENT = Groq(api_key=self.api_key)
+            self.client = _CACHED_GROQ_CLIENT
+        else:
+            self.client = None
 
     def parse_invoice_request(
         self, user_prompt: str, chat_history: Optional[List[Dict[str, str]]] = None
@@ -87,7 +94,7 @@ class GroqService:
                     model=model_name,
                     messages=messages,
                     temperature=0.1,
-                    max_tokens=800,
+                    max_tokens=350,
                 )
                 raw_content = response.choices[0].message.content.strip()
                 parsed = self._extract_json(raw_content)

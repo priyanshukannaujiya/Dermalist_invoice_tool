@@ -34,16 +34,20 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Initialize database
-database.init_db()
-
-# Services initialization
-excel_service = ExcelService()
-pdf_service = PDFService()
-invoice_service = InvoiceService(excel_service=excel_service, pdf_service=pdf_service)
-
 import base64
 from PIL import Image
+
+# Services initialization cached across reruns for lightning speed
+@st.cache_resource
+def get_services():
+    database.init_db()
+    excel = ExcelService()
+    pdf = PDFService()
+    inv = InvoiceService(excel_service=excel, pdf_service=pdf)
+    groq = GroqService()
+    return excel, pdf, inv, groq
+
+excel_service, pdf_service, invoice_service, groq_service = get_services()
 
 # Logo and Branding assets
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -64,13 +68,16 @@ if not os.path.exists(LOGO_PATH):
             except Exception:
                 pass
 
-LOGO_B64 = ""
-if os.path.exists(LOGO_PATH):
-    try:
-        with open(LOGO_PATH, "rb") as f_img:
-            LOGO_B64 = base64.b64encode(f_img.read()).decode()
-    except Exception:
-        pass
+@st.cache_data
+def get_template_bytes(template_path: str) -> bytes:
+    if os.path.exists(template_path):
+        with open(template_path, "rb") as f_tpl:
+            return f_tpl.read()
+    return b""
+
+@st.cache_data(ttl=15)
+def get_cached_dashboard_metrics():
+    return database.get_dashboard_metrics()
 
 def render_top_header(title: str, subtitle: str):
     """Render an executive branded header banner with prominent Dermalist logo."""
@@ -321,23 +328,23 @@ with st.sidebar:
     tpl_ok = excel_service.verify_template()
     if tpl_ok:
         st.success("Master Excel: Active", icon="✅")
-        if os.path.exists(excel_service.template_path):
-            with open(excel_service.template_path, "rb") as f_tpl:
-                st.download_button(
-                    label="📥 Download Master Template",
-                    data=f_tpl.read(),
-                    file_name="non gst invoice format - Dermalist (2).xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True,
-                    help="Download the original blank master Excel template"
-                )
+        tpl_bytes = get_template_bytes(excel_service.template_path)
+        if tpl_bytes:
+            st.download_button(
+                label="📥 Download Master Template",
+                data=tpl_bytes,
+                file_name="non gst invoice format - Dermalist (2).xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+                help="Download the original blank master Excel template"
+            )
     else:
         st.error("Master Excel: Missing!", icon="⚠️")
 
     # Groq Key Status
     groq_key = os.getenv("GROQ_API_KEY", "")
     if groq_key:
-        st.info(f"Groq API: Connected ({os.getenv('GROQ_MODEL', 'llama-3.3-70b-versatile')})", icon="⚡")
+        st.info(f"Groq API: Connected ({os.getenv('GROQ_MODEL', 'qwen/qwen3.8-27b')})", icon="⚡")
     else:
         st.warning("Groq API Key: Not Configured", icon="🔑")
 
@@ -346,7 +353,7 @@ with st.sidebar:
 if page == "📊 Dashboard":
     render_top_header("Business Dashboard", "Overview of your non-GST invoicing operations, monthly volume, and receivables.")
 
-    metrics = database.get_dashboard_metrics()
+    metrics = get_cached_dashboard_metrics()
 
     c1, c2, c3, c4 = st.columns(4)
     with c1:
@@ -400,7 +407,7 @@ if page == "📊 Dashboard":
     col_a, col_b = st.columns([2, 1])
     with col_a:
         st.subheader("Recent Invoices")
-        recent_invoices = database.get_invoices()[:5]
+        recent_invoices = database.get_invoices(limit=5)
 
         if recent_invoices:
             display_data = []
@@ -504,14 +511,13 @@ elif page == "💬 Create Invoice":
         st.session_state.chat_messages.append({"role": "user", "content": query_to_process})
 
         with st.spinner("🤖 Analyzing your invoice instruction with Groq..."):
-            groq_svc = GroqService()
             # Convert session chat history for LLM context
             history_for_llm = [
                 {"role": m["role"], "content": m["content"]}
                 for m in st.session_state.chat_messages
                 if m.get("content")
             ]
-            extraction = groq_svc.parse_invoice_request(query_to_process, chat_history=history_for_llm)
+            extraction = groq_service.parse_invoice_request(query_to_process, chat_history=history_for_llm)
 
             bot_reply = extraction.get("bot_reply", "Understood your request.")
             st.session_state.chat_messages.append({"role": "assistant", "content": bot_reply})
@@ -677,6 +683,7 @@ elif page == "💬 Create Invoice":
                                 invoice_data=final_invoice_data,
                                 creator_data=chosen_creator_payload,
                             )
+                            st.cache_data.clear()
                             st.session_state.last_generated_invoice = generated
                             st.session_state.pending_draft = None
                             st.success(f"🎉 Invoice {inv_number} successfully generated for {final_creator_name}!")
@@ -788,6 +795,7 @@ elif page == "👥 Creators":
                                 st.error("; ".join(errors))
                             else:
                                 database.update_creator(creator["id"], update_data)
+                                st.cache_data.clear()
                                 st.success("Creator profile updated successfully!")
                                 st.rerun()
 
@@ -796,6 +804,7 @@ elif page == "👥 Creators":
                         if st.button("Permanently Delete Creator", key=f"del_creator_{creator['id']}", type="secondary"):
                             try:
                                 database.delete_creator(creator["id"])
+                                st.cache_data.clear()
                                 st.success(f"Creator '{creator['name']}' deleted.")
                                 st.rerun()
                             except ValueError as ve:
@@ -840,6 +849,7 @@ elif page == "👥 Creators":
                     st.error("; ".join(errors))
                 else:
                     new_id = database.create_creator(data)
+                    st.cache_data.clear()
                     st.success(f"Creator '{new_name}' created successfully (ID: {new_id})!")
                     st.rerun()
 
@@ -917,6 +927,7 @@ elif page == "📜 Invoice History":
                     )
                     if new_status != inv["status"]:
                         database.update_invoice_status(inv["id"], new_status)
+                        st.cache_data.clear()
                         st.success(f"Status updated to {new_status}!")
                         st.rerun()
 

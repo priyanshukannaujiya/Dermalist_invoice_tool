@@ -7,6 +7,9 @@ maxUploadSize = 25
 [browser]
 gatherUsageStats = false
 
+[runner]
+fastReruns = true
+
 [theme]
 primaryColor = "#047857"
 backgroundColor = "#f8fafc"
