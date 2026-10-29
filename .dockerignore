@@ -1,0 +1,15 @@
+.git
+.gitignore
+.env
+.pytest_cache
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.log
+.system_generated
+AI_Invoice_Studio.zip
+tests
+generated_invoices/test_output
+data/*.db
+data/*.db-journal
