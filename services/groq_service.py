@@ -210,6 +210,14 @@ class GroqService:
             "bot_reply": bot_reply,
         }
 
+    @staticmethod
+    def is_account_query(prompt: str) -> Tuple[bool, Optional[str]]:
+        return is_account_query(prompt)
+
+    @staticmethod
+    def format_account_details_card(creator: Dict[str, Any]) -> str:
+        return format_account_details_card(creator)
+
 
 def is_account_query(prompt: str) -> Tuple[bool, Optional[str]]:
     """

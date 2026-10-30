@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 
 # Ensure backend services are imported
 from services import database
-from services.groq_service import GroqService
+from services.groq_service import GroqService, is_account_query, format_account_details_card
 from services.excel_service import ExcelService
 from services.pdf_service import PDFService
 from services.invoice_service import InvoiceService
@@ -512,12 +512,12 @@ elif page == "💬 Create Invoice":
         st.session_state.chat_messages.append({"role": "user", "content": query_to_process})
 
         # 1. Check if user is asking to fetch or view creator/user account details
-        is_acct, target_name = groq_service.is_account_query(query_to_process)
+        is_acct, target_name = is_account_query(query_to_process)
         if is_acct:
             if target_name:
                 creator = database.get_creator_account_details(target_name)
                 if creator:
-                    reply = groq_service.format_account_details_card(creator)
+                    reply = format_account_details_card(creator)
                 else:
                     all_c = database.get_creators()
                     avail = ", ".join(c["name"] for c in all_c[:6])
@@ -529,7 +529,7 @@ elif page == "💬 Create Invoice":
             else:
                 all_c = database.get_creators()
                 if all_c:
-                    cards = [groq_service.format_account_details_card(c) for c in all_c[:3]]
+                    cards = [format_account_details_card(c) for c in all_c[:3]]
                     reply = "### 📋 Registered Creator Account Profiles\n\n" + "\n\n---\n\n".join(cards)
                     if len(all_c) > 3:
                         reply += f"\n\n*...plus {len(all_c) - 3} more profiles available in the **👥 Creators** page.*"
