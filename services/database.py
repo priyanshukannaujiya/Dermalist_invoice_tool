@@ -451,22 +451,48 @@ def find_creator_by_name(name: str, db_path: Optional[str] = None) -> Optional[D
     if row:
         return row
 
-    # Substring match
+    # Prefix/suffix or word match (e.g. "Rohan" matches "Rohan Sharma", but "Riya" does not match inside "Priya")
     row = execute_query(
-        "SELECT * FROM creators WHERE LOWER(name) LIKE LOWER(?) LIMIT 1",
-        (f"%{cleaned}%",),
+        """
+        SELECT * FROM creators 
+        WHERE LOWER(name) LIKE LOWER(?)
+           OR LOWER(name) LIKE LOWER(?)
+           OR LOWER(name) LIKE LOWER(?)
+        LIMIT 1
+        """,
+        (f"{cleaned} %", f"% {cleaned}", f"% {cleaned} %"),
         fetch_one=True,
         db_path=db_path,
     )
     if row:
         return row
 
-    # Check by individual tokens
+    # Check by individual words only when user supplied a single word query (e.g. "Rohan" -> "Rohan Sharma")
+    # If the user supplied full "First Last" like "Riya Sharma", do NOT accidentally match "Rohan Sharma" on surname alone
     tokens = [t for t in cleaned.split() if len(t) > 2 and t.lower() not in ["the", "user", "account", "details", "fetch", "show"]]
-    for token in tokens:
+    if len(tokens) == 1:
+        token = tokens[0]
+        row = execute_query(
+            """
+            SELECT * FROM creators 
+            WHERE LOWER(name) = LOWER(?)
+               OR LOWER(name) LIKE LOWER(?)
+               OR LOWER(name) LIKE LOWER(?)
+               OR LOWER(name) LIKE LOWER(?)
+            LIMIT 1
+            """,
+            (token, f"{token} %", f"% {token}", f"% {token} %"),
+            fetch_one=True,
+            db_path=db_path,
+        )
+        if row:
+            return row
+    elif len(tokens) > 1:
+        # Match if first name matches
+        first_word = tokens[0]
         row = execute_query(
             "SELECT * FROM creators WHERE LOWER(name) LIKE LOWER(?) LIMIT 1",
-            (f"%{token}%",),
+            (f"{first_word} %",),
             fetch_one=True,
             db_path=db_path,
         )
