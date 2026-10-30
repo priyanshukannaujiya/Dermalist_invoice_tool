@@ -511,6 +511,35 @@ elif page == "💬 Create Invoice":
         # Append user message
         st.session_state.chat_messages.append({"role": "user", "content": query_to_process})
 
+        # 1. Check if user is asking to fetch or view creator/user account details
+        is_acct, target_name = groq_service.is_account_query(query_to_process)
+        if is_acct:
+            if target_name:
+                creator = database.get_creator_account_details(target_name)
+                if creator:
+                    reply = groq_service.format_account_details_card(creator)
+                else:
+                    all_c = database.get_creators()
+                    avail = ", ".join(c["name"] for c in all_c[:6])
+                    reply = (
+                        f"🔍 Could not find creator account matching **'{target_name}'**.\n\n"
+                        f"**Available saved creators:** {avail}.\n\n"
+                        f"You can also view or add creators in the **👥 Creators** page."
+                    )
+            else:
+                all_c = database.get_creators()
+                if all_c:
+                    cards = [groq_service.format_account_details_card(c) for c in all_c[:3]]
+                    reply = "### 📋 Registered Creator Account Profiles\n\n" + "\n\n---\n\n".join(cards)
+                    if len(all_c) > 3:
+                        reply += f"\n\n*...plus {len(all_c) - 3} more profiles available in the **👥 Creators** page.*"
+                else:
+                    reply = "ℹ️ No creator account profiles currently found in database. You can register new creators in the **👥 Creators** page."
+
+            st.session_state.chat_messages.append({"role": "assistant", "content": reply})
+            st.rerun()
+
+        # 2. Otherwise parse invoice generation request with Groq
         with st.spinner("🤖 Analyzing your invoice instruction with Groq..."):
             # Convert session chat history for LLM context
             history_for_llm = [
@@ -539,6 +568,58 @@ elif page == "💬 Create Invoice":
         st.markdown("### 📋 Invoice Draft Preview (Requires Confirmation)")
         st.info("Please review and optionally adjust the details below. Click **Confirm & Generate Invoice** to generate the files.")
 
+        all_creators = database.get_creators()
+
+        # Check if draft or prompt matches an existing saved creator in DB
+        matched_creator = draft.get("creator_profile") or None
+        if not matched_creator and draft.get("creator_name"):
+            matched_creator = database.find_creator_by_name(draft["creator_name"])
+
+        default_sel_idx = 0
+        if matched_creator:
+            for idx, c in enumerate(all_creators):
+                if c["id"] == matched_creator["id"]:
+                    default_sel_idx = idx + 1
+                    break
+
+        profile_options = ["-- Enter Unique / New Creator --"] + [f"👤 {c['name']}" for c in all_creators]
+
+        # Creator Selection OUTSIDE form so it triggers reactive re-render with banking data
+        st.markdown("##### 👤 Creator Profile Selection (Auto-fills Verified Bank & PAN Info)")
+        col_sel_prof, col_sel_note = st.columns([2, 3])
+        with col_sel_prof:
+            selected_profile_label = st.selectbox(
+                "Choose Saved Profile:",
+                options=profile_options,
+                index=default_sel_idx,
+                key="draft_profile_selector",
+                help="Choose a saved creator to auto-fill their PAN and bank details, or keep 'Enter Unique' to supply custom data.",
+            )
+        with col_sel_note:
+            st.markdown("<div style='height: 25px;'></div>", unsafe_allow_html=True)
+            if selected_profile_label != "-- Enter Unique / New Creator --":
+                st.success("✅ Auto-filled account & bank details from saved database profile.")
+            else:
+                st.caption("🆕 Unique / New creator data will be saved with this invoice.")
+
+        # Determine base creator data to populate fields
+        base_data = {}
+        linked_creator_id = None
+        if selected_profile_label != "-- Enter Unique / New Creator --":
+            for c in all_creators:
+                if f"👤 {c['name']}" == selected_profile_label:
+                    base_data = dict(c)
+                    linked_creator_id = c["id"]
+                    break
+        elif matched_creator:
+            base_data = dict(matched_creator)
+            linked_creator_id = matched_creator["id"]
+        elif draft.get("creator_profile"):
+            base_data = dict(draft["creator_profile"])
+            linked_creator_id = base_data.get("id")
+
+        active_creator_name = base_data.get("name") or draft.get("creator_name") or ""
+
         with st.container():
             # Editable form for draft
             with st.form("draft_confirmation_form"):
@@ -550,50 +631,7 @@ elif page == "💬 Create Invoice":
                 with col_inv2:
                     inv_date = st.text_input("Invoice Date", value=draft["invoice_date"])
                 with col_inv3:
-                    prompt_creator_name = draft.get("creator_name") or ""
-                    creator_name_input = st.text_input("Creator Name *", value=prompt_creator_name)
-
-                # Check if prompt matches an existing saved creator in DB
-                all_creators = database.get_creators()
-                matched_creator = None
-                default_sel_idx = 0
-                if creator_name_input.strip():
-                    matched = database.find_creator_by_name(creator_name_input.strip())
-                    if matched and matched["name"].strip().lower() == creator_name_input.strip().lower():
-                        matched_creator = matched
-                        for idx, c in enumerate(all_creators):
-                            if c["id"] == matched["id"]:
-                                default_sel_idx = idx + 1
-                                break
-
-                profile_options = ["-- Enter Unique / New Creator --"] + [f"👤 {c['name']}" for c in all_creators]
-                col_sel_prof, col_sel_note = st.columns([2, 3])
-                with col_sel_prof:
-                    selected_profile_label = st.selectbox(
-                        "Auto-fill Details from Saved Profile (Optional):",
-                        options=profile_options,
-                        index=default_sel_idx,
-                        help="Choose a saved creator to auto-fill their PAN and bank details, or keep 'Enter Unique' to supply custom data.",
-                    )
-                with col_sel_note:
-                    st.markdown("<div style='height: 25px;'></div>", unsafe_allow_html=True)
-                    if selected_profile_label != "-- Enter Unique / New Creator --":
-                        st.caption("✅ Auto-filled from saved database profile.")
-                    else:
-                        st.caption("🆕 Unique / New creator data will be saved with this invoice.")
-
-                # Determine base creator data to populate fields
-                base_data = {}
-                linked_creator_id = None
-                if selected_profile_label != "-- Enter Unique / New Creator --":
-                    for c in all_creators:
-                        if f"👤 {c['name']}" == selected_profile_label:
-                            base_data = dict(c)
-                            linked_creator_id = c["id"]
-                            break
-                elif matched_creator:
-                    base_data = dict(matched_creator)
-                    linked_creator_id = matched_creator["id"]
+                    creator_name_input = st.text_input("Creator Name *", value=active_creator_name)
 
                 # Editable Creator & Banking Details
                 with st.expander("👤 Creator Details & Banking Information (Editable)", expanded=True):
@@ -609,7 +647,7 @@ elif page == "💬 Create Invoice":
                     with c_col3:
                         c_bank_acc = st.text_input("Bank Account Number", value=base_data.get("bank_account") or "")
                         c_ifsc = st.text_input("IFSC Code", value=base_data.get("ifsc") or "").upper()
-                        c_holder = st.text_input("Account Holder Name", value=base_data.get("account_holder") or creator_name_input.strip())
+                        c_holder = st.text_input("Account Holder Name", value=base_data.get("account_holder") or active_creator_name)
 
                 st.markdown("##### 2. Service & Line Items")
                 col_srv1, col_srv2 = st.columns([3, 1])
@@ -813,6 +851,7 @@ elif page == "👥 Creators":
                                 st.warning(str(ve))
                             except Exception as ex:
                                 st.error(f"Could not delete creator: {str(ex)}")
+        else:
             st.info("No creator profiles match your query.")
 
     with tab2:

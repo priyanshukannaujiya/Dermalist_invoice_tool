@@ -367,6 +367,20 @@ def seed_initial_data(db_path: Optional[str] = None, use_pg: bool = False) -> No
                 now,
                 now,
             ),
+            (
+                "Kunal Kapoor",
+                "902 Silver Oak, Bandra, Mumbai 400050",
+                "kunal@kapoor.com",
+                "+91 99999 11111",
+                "KUNAL1234K",
+                "kunal@kotak",
+                "987654321012",
+                "KKBK0000123",
+                "Kunal Kapoor",
+                "Kotak Mahindra Bank",
+                now,
+                now,
+            ),
         ]
 
         for c in sample_creators:
@@ -388,21 +402,23 @@ def seed_initial_data(db_path: Optional[str] = None, use_pg: bool = False) -> No
 
 
 def get_creators(search_query: Optional[str] = None, db_path: Optional[str] = None) -> List[Dict[str, Any]]:
-    """Retrieve creator profiles, optionally filtered by search query."""
+    """Retrieve creator profiles, optionally filtered by search query across personal and banking details."""
     if search_query:
         q = f"%{search_query.strip()}%"
         return execute_query(
             """
             SELECT * FROM creators 
             WHERE name ILIKE ? OR email ILIKE ? OR phone ILIKE ? OR pan ILIKE ?
+               OR bank_account ILIKE ? OR upi_id ILIKE ? OR bank_name ILIKE ? OR account_holder ILIKE ?
             ORDER BY name ASC
             """ if is_postgres_configured() and db_path is None else
             """
             SELECT * FROM creators 
             WHERE name LIKE ? OR email LIKE ? OR phone LIKE ? OR pan LIKE ?
+               OR bank_account LIKE ? OR upi_id LIKE ? OR bank_name LIKE ? OR account_holder LIKE ?
             ORDER BY name ASC
             """,
-            (q, q, q, q),
+            (q, q, q, q, q, q, q, q),
             fetch_all=True,
             db_path=db_path,
         ) or []
@@ -417,6 +433,11 @@ def get_creator_by_id(creator_id: int, db_path: Optional[str] = None) -> Optiona
 def find_creator_by_name(name: str, db_path: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """Find creator with case-insensitive exact or substring match."""
     cleaned = name.strip()
+    # Strip common conversational prefix if present
+    for prefix in ["details of user", "account details of", "user", "creator", "for"]:
+        if cleaned.lower().startswith(prefix + " "):
+            cleaned = cleaned[len(prefix) + 1:].strip()
+
     if not cleaned:
         return None
 
@@ -441,17 +462,38 @@ def find_creator_by_name(name: str, db_path: Optional[str] = None) -> Optional[D
         return row
 
     # Check by individual tokens
-    tokens = cleaned.split()
+    tokens = [t for t in cleaned.split() if len(t) > 2 and t.lower() not in ["the", "user", "account", "details", "fetch", "show"]]
     for token in tokens:
-        if len(token) > 2:
-            row = execute_query(
-                "SELECT * FROM creators WHERE LOWER(name) LIKE LOWER(?) LIMIT 1",
-                (f"%{token}%",),
-                fetch_one=True,
-                db_path=db_path,
-            )
-            if row:
-                return row
+        row = execute_query(
+            "SELECT * FROM creators WHERE LOWER(name) LIKE LOWER(?) LIMIT 1",
+            (f"%{token}%",),
+            fetch_one=True,
+            db_path=db_path,
+        )
+        if row:
+            return row
+
+    return None
+
+
+def get_creator_account_details(query: str, db_path: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """
+    Search and fetch verified account details for a creator by name,
+    email, phone, PAN, UPI, or bank account.
+    """
+    cleaned = query.strip()
+    if not cleaned:
+        return None
+
+    # First attempt exact/substring name match
+    creator = find_creator_by_name(cleaned, db_path=db_path)
+    if creator:
+        return creator
+
+    # Next attempt search across all fields
+    matches = get_creators(search_query=cleaned, db_path=db_path)
+    if matches:
+        return matches[0]
 
     return None
 

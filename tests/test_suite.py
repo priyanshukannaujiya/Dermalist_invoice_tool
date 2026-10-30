@@ -312,3 +312,74 @@ def test_unique_creator_invoice_generation():
     assert "Aaditi" not in str(ws["B2"].value)
     wb.close()
 
+
+def test_get_creator_account_details():
+    """Verify get_creator_account_details successfully fetches account info."""
+    details = database.get_creator_account_details("Rohan Sharma", db_path=TEST_DB_PATH)
+    assert details is not None
+    assert details["name"] == "Rohan Sharma"
+    assert details["bank_account"] == "002301567890"
+    assert details["ifsc"] == "ICIC0000023"
+    assert details["bank_name"] == "ICICI Bank"
+
+    # Partial name match
+    partial = database.get_creator_account_details("Priya", db_path=TEST_DB_PATH)
+    assert partial is not None
+    assert partial["name"] == "Priya Venkat"
+    assert partial["bank_account"] == "912010045678901"
+
+
+def test_get_creators_search_across_banking_fields():
+    """Verify searching creators by bank account number, UPI, or bank name."""
+    # Search by bank account number
+    res_acc = database.get_creators(search_query="50100234567890", db_path=TEST_DB_PATH)
+    assert len(res_acc) == 1
+    assert res_acc[0]["name"] == "Aaditi Abhijeet Raut"
+
+    # Search by UPI ID
+    res_upi = database.get_creators(search_query="rohansharma@icici", db_path=TEST_DB_PATH)
+    assert len(res_upi) == 1
+    assert res_upi[0]["name"] == "Rohan Sharma"
+
+    # Search by bank name
+    res_bank = database.get_creators(search_query="Axis Bank", db_path=TEST_DB_PATH)
+    assert any(c["name"] == "Priya Venkat" for c in res_bank)
+
+
+def test_is_account_query_detection():
+    """Verify detection of user account inquiries."""
+    from services.groq_service import is_account_query, format_account_details_card
+
+    is_acct, target = is_account_query("fetch details of user Rohan Sharma")
+    assert is_acct is True
+    assert target == "Rohan Sharma"
+
+    is_acct2, target2 = is_account_query("fetch details of user account details")
+    assert is_acct2 is True
+    assert target2 is None
+
+    is_acct3, target3 = is_account_query("show bank details of Kunal")
+    assert is_acct3 is True
+    assert target3 == "Kunal"
+
+    # Standard invoice generation prompt should not be treated as account query
+    is_acct_inv, _ = is_account_query("Generate invoice for Aaditi for 5000 for 1 reel")
+    assert is_acct_inv is False
+
+    # Check card formatting
+    card = format_account_details_card({
+        "name": "Test Creator",
+        "bank_account": "123456789",
+        "ifsc": "TEST0001",
+        "account_holder": "Test Creator",
+        "bank_name": "Test Bank",
+        "upi_id": "test@upi",
+        "pan": "TESTP1234F",
+        "email": "test@example.com",
+        "phone": "+91 99999 88888",
+        "address": "Test Address",
+    })
+    assert "123456789" in card
+    assert "TEST0001" in card
+    assert "Test Bank" in card
+
