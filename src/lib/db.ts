@@ -219,25 +219,44 @@ export async function findCreatorByName(name: string): Promise<Creator | null> {
     if (panMatch.length > 0) return panMatch[0];
   }
 
-  // 3. Try partial substring match (name contains query or query contains name)
-  const partial = await query<Creator>(
-    "SELECT * FROM creators WHERE name ILIKE $1 OR $2 ILIKE ('%' || name || '%') ORDER BY LENGTH(name) ASC LIMIT 1",
-    [`%${trimmed}%`, trimmed]
-  );
-  if (partial.length > 0) return partial[0];
-
-  // 4. Try matching individual words (skip common prefixes like Mr, Miss, Influencer)
-  const words = trimmed
+  // 3. Extract meaningful words (filtering out common prefixes/honorifics)
+  // Strip out special regex characters to safely pass into Postgres regex
+  const sanitized = trimmed.replace(/[^\w\s]/g, " ").trim();
+  const words = sanitized
     .split(/\s+/)
-    .map((w) => w.replace(/[^a-zA-Z0-9]/g, ""))
-    .filter((w) => w.length >= 3 && !["mr", "mrs", "miss", "the", "creator", "influencer"].includes(w.toLowerCase()));
-
-  for (const word of words) {
-    const wordMatch = await query<Creator>(
-      "SELECT * FROM creators WHERE name ILIKE $1 ORDER BY LENGTH(name) ASC LIMIT 1",
-      [`%${word}%`]
+    .map((w) => w.trim())
+    .filter(
+      (w) =>
+        w.length >= 2 &&
+        !["mr", "mrs", "ms", "miss", "dr", "the", "creator", "influencer", "profile"].includes(
+          w.toLowerCase()
+        )
     );
-    if (wordMatch.length > 0) return wordMatch[0];
+
+  if (words.length === 0) return null;
+
+  // 4. If query has multiple words (e.g. "Sneha Patil" or "Neha Patil"):
+  // Require ALL words to match as discrete words with PostgreSQL word boundary regex \y
+  // This guarantees that "Neha Patil" will NEVER match "Sneha Patil" or "Priya Patil"
+  if (words.length > 1) {
+    const conditions = words.map((_, i) => `name ~* $${i + 1}`).join(" AND ");
+    const regexParams = words.map((w) => `\\y${w}\\y`);
+    const multiMatch = await query<Creator>(
+      `SELECT * FROM creators WHERE ${conditions} ORDER BY LENGTH(name) ASC LIMIT 1`,
+      regexParams
+    );
+    if (multiMatch.length > 0) return multiMatch[0];
+  }
+
+  // 5. If query is a single word (e.g. "Sneha"):
+  // Require word boundary regex \y so "Neha" does NOT match "Sneha"
+  if (words.length === 1 && words[0].length >= 3) {
+    const singleWord = words[0];
+    const singleMatch = await query<Creator>(
+      "SELECT * FROM creators WHERE name ~* $1 ORDER BY LENGTH(name) ASC LIMIT 1",
+      [`\\y${singleWord}\\y`]
+    );
+    if (singleMatch.length > 0) return singleMatch[0];
   }
 
   return null;

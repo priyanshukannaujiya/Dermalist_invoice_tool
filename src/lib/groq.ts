@@ -27,17 +27,18 @@ const FALLBACK_MODELS = [
 
 const SYSTEM_PROMPT = `
 You are an expert AI Invoice Assistant specialized in extracting invoice details for Dermalist creator billings.
-Your role is to analyze conversational requests and extract the core billing details into a clean JSON object.
+Your role is to analyze conversational requests or structured creator briefs and extract the billing details into a clean JSON object.
 
 SECURITY / PRIVACY RULE:
-Do NOT extract or store sensitive bank account credentials if they appear; focus on creator name, services rendered, and commercial amounts.
+Do NOT extract or store sensitive bank account credentials if they appear; focus on creator name, billing address, services rendered, and commercial amounts.
 
 Required JSON Output Schema:
 {
-  "creatorName": string or null (full name of creator/influencer, e.g. "Aaditi Raut" or "Sneha Patil"),
+  "creatorName": string or null (full name of creator/influencer, e.g. "Neha Patil", "Aaditi Raut", "Sneha Patil"),
+  "creatorAddress": string or null (full billing address or residence if mentioned in the prompt, or null),
   "date": string or null (invoice date mentioned or null, e.g. "29-10-2026" or "29 Oct 2026"),
-  "description": string (service description, e.g. "One promotional video for Dermalist"),
-  "taxableValue": number (numeric value in INR before discount, e.g. 2500),
+  "description": string (service description, e.g. "Promotional Video for Dermalist" or "Brand Collaboration Services"),
+  "taxableValue": number (numeric value in INR before discount, e.g. 2500, default 0 if not mentioned),
   "discount": number (discount amount in INR if mentioned, default 0),
   "deliverableLink": string or null (URL or video link if provided),
   "quantity": number (default 1),
@@ -47,25 +48,97 @@ Required JSON Output Schema:
 Rules:
 1. Parse rupee symbols (₹, Rs, INR, k/K e.g. 2.5k -> 2500, ₹2,500 -> 2500) accurately into numeric values.
 2. If quantity is specified (e.g. "2 reels", "one video"), extract quantity as integer and adjust taxableValue if it is a total or per unit.
-3. Respond ONLY with valid JSON.
+3. If no price is mentioned, set taxableValue to 0.
+4. Respond ONLY with valid JSON.
 `;
 
 // Helper: Extract credentials locally on the server without sending them to Groq
 function extractLocalCredentials(prompt: string) {
-  const panMatch = prompt.match(/\b([A-Z]{5}[0-9]{4}[A-Z]{1})\b/i);
-  const ifscMatch = prompt.match(/\b([A-Z]{4}0[A-Z0-9]{6})\b/i);
-  const upiMatch = prompt.match(/\b([a-zA-Z0-9.\-_]{2,}@[a-zA-Z0-9]{2,})\b/);
-  const accMatch = prompt.match(/\b(\d{9,18})\b/);
-  const phoneMatch = prompt.match(/(?:\+91[\s-]?)?([6-9]\d{9})\b/);
-  const emailMatch = prompt.match(/\b([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})\b/);
+  const panMatch =
+    prompt.match(/(?:^|\n|\s)(?:pan(?:\s*number|\s*no\.?)?)\s*[:=-]?\s*([A-Z]{5}[0-9]{4}[A-Z]{1})\b/i) ||
+    prompt.match(/\b([A-Z]{5}[0-9]{4}[A-Z]{1})\b/i);
+
+  const ifscMatch =
+    prompt.match(/(?:^|\n|\s)(?:ifsc(?:\s*code)?)\s*[:=-]?\s*([A-Z]{4}0[A-Z0-9]{6})\b/i) ||
+    prompt.match(/\b([A-Z]{4}0[A-Z0-9]{6})\b/i);
+
+  const emailMatch =
+    prompt.match(/(?:^|\n)\s*(?:email(?:\s*id)?|e-mail)\s*[:=-]?\s*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/i) ||
+    prompt.match(/\b([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})\b/);
+  const email = emailMatch ? emailMatch[1].trim() : null;
+
+  const phoneLabeledMatch = prompt.match(
+    /(?:^|\n)\s*(?:contact(?:\s*number|\s*no\.?)?|phone(?:\s*number|\s*no\.?)?|mobile(?:\s*number|\s*no\.?)?|whatsapp)\s*[:=-]?\s*([+0-9\s-]{10,15})/i
+  );
+  const phoneGenericMatch = prompt.match(/(?:(?:\+91|0)[\s-]?)?([6-9]\d{9})\b/);
+  const phone = phoneLabeledMatch
+    ? phoneLabeledMatch[1].replace(/[^\d+]/g, "").trim()
+    : phoneGenericMatch
+    ? phoneGenericMatch[1]
+    : null;
+
+  const nameLineMatch = prompt.match(
+    /(?:^|\n)\s*(?:creator(?:\s*name)?|influencer|name|bill\s*to)\s*[:=-]\s*([^\n\r,]+)/i
+  );
+  const name = nameLineMatch ? nameLineMatch[1].trim() : null;
+
+  const addrLineMatch = prompt.match(
+    /(?:^|\n)\s*(?:address|location|residence)\s*[:=-]\s*([^\n\r]+)/i
+  );
+  const address = addrLineMatch ? addrLineMatch[1].trim() : null;
+
+  const bankNameMatch = prompt.match(/(?:^|\n)\s*(?:bank(?:\s*name)?)\s*[:=-]\s*([^\n\r,]+)/i);
+  const bank_name = bankNameMatch ? bankNameMatch[1].trim() : null;
+
+  // Bank account: require explicit account keyword or 11+ digits to avoid confusing with 10-digit phone numbers
+  const accMatch = prompt.match(
+    /(?:(?:bank\s*)?a\/?c(?:\s*no\.?|\s*number)?|account(?:\s*no\.?|\s*number)?|bank\s*account)\s*[:=-]?\s*(\d{9,18})\b/i
+  );
+  let bank_account = accMatch ? accMatch[1] : null;
+
+  if (!bank_account) {
+    const standaloneMatches = prompt.match(/\b(\d{11,18})\b/g);
+    if (standaloneMatches) {
+      for (const num of standaloneMatches) {
+        if (phone && num.includes(phone)) continue;
+        bank_account = num;
+        break;
+      }
+    }
+  }
+
+  let upi_id: string | null = null;
+  const upiExplicit = prompt.match(
+    /(?:^|\n|\s)(?:upi(?:\s*id)?|vpa)\s*[:=-]?\s*([a-zA-Z0-9.\-_]{2,}@[a-zA-Z0-9]{2,})\b/i
+  );
+  if (upiExplicit) {
+    upi_id = upiExplicit[1].trim();
+  } else {
+    // Only capture as UPI if it is not an email domain (does not continue with .com, .in, etc.)
+    const genericUpiMatches = prompt.match(/\b([a-zA-Z0-9.\-_]{2,}@[a-zA-Z0-9]{2,})\b/g);
+    if (genericUpiMatches) {
+      for (const m of genericUpiMatches) {
+        if (email && email.startsWith(m)) continue;
+        const afterIndex = prompt.indexOf(m) + m.length;
+        if (prompt[afterIndex] === "." && /^\.[a-zA-Z]{2,}/.test(prompt.slice(afterIndex))) {
+          continue;
+        }
+        upi_id = m;
+        break;
+      }
+    }
+  }
 
   return {
+    name,
+    address,
     pan: panMatch ? panMatch[1].toUpperCase() : null,
     ifsc: ifscMatch ? ifscMatch[1].toUpperCase() : null,
-    upi_id: upiMatch ? upiMatch[1] : null,
-    bank_account: accMatch ? accMatch[1] : null,
-    phone: phoneMatch ? phoneMatch[0] : null,
-    email: emailMatch ? emailMatch[1] : null,
+    upi_id,
+    bank_account,
+    bank_name,
+    phone,
+    email,
   };
 }
 
@@ -75,15 +148,23 @@ export async function parseInvoiceWithGroq(prompt: string): Promise<ParsedInvoic
     throw new Error("GROQ_API_KEY is not configured in the environment.");
   }
 
-  // Extract any credentials locally first
+  // Extract any credentials and structured lines locally first
   const localCreds = extractLocalCredentials(prompt);
 
-  // Redact sensitive account numbers and PANs before calling Groq
-  const sanitizedPrompt = prompt
-    .replace(/\b[A-Z]{5}[0-9]{4}[A-Z]{1}\b/gi, "[REDACTED_PAN]")
-    .replace(/\b[A-Z]{4}0[A-Z0-9]{6}\b/gi, "[REDACTED_IFSC]")
-    .replace(/\b\d{9,18}\b/g, "[REDACTED_ACCOUNT]")
-    .replace(/\b[a-zA-Z0-9.\-_]{2,}@[a-zA-Z0-9]{2,}\b/g, "[REDACTED_UPI]");
+  // Redact ONLY sensitive account numbers and PANs before calling Groq
+  let sanitizedPrompt = prompt;
+  if (localCreds.pan) {
+    sanitizedPrompt = sanitizedPrompt.replace(new RegExp(localCreds.pan, "gi"), "[REDACTED_PAN]");
+  }
+  if (localCreds.ifsc) {
+    sanitizedPrompt = sanitizedPrompt.replace(new RegExp(localCreds.ifsc, "gi"), "[REDACTED_IFSC]");
+  }
+  if (localCreds.bank_account) {
+    sanitizedPrompt = sanitizedPrompt.replace(new RegExp(localCreds.bank_account, "g"), "[REDACTED_ACCOUNT]");
+  }
+  if (localCreds.upi_id) {
+    sanitizedPrompt = sanitizedPrompt.replace(new RegExp(localCreds.upi_id, "g"), "[REDACTED_UPI]");
+  }
 
   const groq = new Groq({ apiKey });
   const configuredModel = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
@@ -129,7 +210,10 @@ export async function parseInvoiceWithGroq(prompt: string): Promise<ParsedInvoic
     }
   }
 
-  const creatorName = extracted.creatorName?.trim() || null;
+  // Determine final creator name and address (prefer explicit user-provided lines)
+  const finalCreatorName = localCreds.name || extracted.creatorName?.trim() || null;
+  const finalAddress = localCreds.address || extracted.creatorAddress?.trim() || "";
+
   const taxableValue = Math.max(0, parseFloat(extracted.taxableValue) || 0);
   const discount = Math.max(0, parseFloat(extracted.discount) || 0);
   const quantity = Math.max(1, parseInt(extracted.quantity, 10) || 1);
@@ -137,13 +221,15 @@ export async function parseInvoiceWithGroq(prompt: string): Promise<ParsedInvoic
   const subtotal = taxableValue;
   const balanceDue = Math.max(0, subtotal - discount);
   const deliverableLink = extracted.deliverableLink || null;
-  const description = extracted.description?.trim() || "Promotional Video for Dermalist";
+  const description =
+    extracted.description?.trim() ||
+    (taxableValue > 0 ? "Promotional Video for Dermalist" : "Creator Collaboration Services");
   const dateFormatted = formatDateDDMMYYYY(extracted.date);
 
-  // Database lookup: match creator securely on server
+  // Database lookup: match creator securely on server with strict word boundaries
   let matchedCreator: Creator | null = null;
-  if (creatorName) {
-    matchedCreator = await findCreatorByName(creatorName);
+  if (finalCreatorName) {
+    matchedCreator = await findCreatorByName(finalCreatorName);
   }
 
   // Overlay any credentials extracted locally from prompt
@@ -151,11 +237,11 @@ export async function parseInvoiceWithGroq(prompt: string): Promise<ParsedInvoic
     ? {
         id: matchedCreator.id,
         name: matchedCreator.name,
-        address: matchedCreator.address || "",
+        address: finalAddress || matchedCreator.address || "",
         email: localCreds.email || matchedCreator.email || "",
         phone: localCreds.phone || matchedCreator.phone || "",
         pan: localCreds.pan || matchedCreator.pan || "",
-        bank_name: matchedCreator.bank_name || "",
+        bank_name: localCreds.bank_name || matchedCreator.bank_name || "",
         bank_account: localCreds.bank_account || matchedCreator.bank_account || "",
         ifsc: localCreds.ifsc || matchedCreator.ifsc || "",
         account_holder: matchedCreator.account_holder || matchedCreator.name,
@@ -164,15 +250,15 @@ export async function parseInvoiceWithGroq(prompt: string): Promise<ParsedInvoic
         msme_registration_no: matchedCreator.msme_registration_no,
       }
     : {
-        name: creatorName || "",
-        address: "",
+        name: finalCreatorName || "",
+        address: finalAddress || "",
         email: localCreds.email || "",
         phone: localCreds.phone || "",
         pan: localCreds.pan || "",
-        bank_name: "",
+        bank_name: localCreds.bank_name || "",
         bank_account: localCreds.bank_account || "",
         ifsc: localCreds.ifsc || "",
-        account_holder: creatorName || "",
+        account_holder: finalCreatorName || "",
         upi_id: localCreds.upi_id || "",
         is_msme: false,
         msme_registration_no: "",
@@ -194,14 +280,14 @@ export async function parseInvoiceWithGroq(prompt: string): Promise<ParsedInvoic
     botReply = `Found verified profile for ${matchedCreator.name}. Bank and tax credentials (${matchedCreator.bank_name || "Bank"}, PAN: ${matchedCreator.pan}) attached securely. Total balance due: ₹${balanceDue.toLocaleString("en-IN")}.`;
   } else if (matchedCreator && !hasCompleteBankDetails) {
     botReply = `Found profile for "${matchedCreator.name}", but banking credentials (PAN, Bank Account, or IFSC) are not complete. Please provide them to ensure the Excel invoice is fully populated.`;
-  } else if (creatorName) {
-    botReply = `Extracted details for "${creatorName}". No saved profile found in the Creator Directory. Please confirm their PAN, Bank Account, and IFSC to generate the invoice.`;
+  } else if (finalCreatorName) {
+    botReply = `Extracted details for "${finalCreatorName}". No saved profile found in the Creator Directory. Please confirm their PAN, Bank Account, and IFSC to generate the invoice.`;
   } else {
     botReply = `Extracted invoice details for ₹${balanceDue.toLocaleString("en-IN")}. Please specify or select a creator to proceed.`;
   }
 
   return {
-    creatorName: matchedCreator ? matchedCreator.name : creatorName,
+    creatorName: matchedCreator ? matchedCreator.name : finalCreatorName,
     date: dateFormatted,
     description,
     taxableValue,
