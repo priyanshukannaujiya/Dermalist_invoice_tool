@@ -9,7 +9,11 @@ import os
 import re
 from typing import Any, Dict, List, Optional, Tuple
 from dotenv import load_dotenv
-from groq import Groq
+
+try:
+    from groq import Groq
+except ImportError:
+    Groq = None
 
 load_dotenv()
 
@@ -53,7 +57,7 @@ class GroqService:
         global _CACHED_GROQ_CLIENT
         self.api_key = api_key or os.getenv("GROQ_API_KEY", "")
         self.primary_model = model or os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b")
-        if self.api_key:
+        if self.api_key and Groq is not None:
             if _CACHED_GROQ_CLIENT is None:
                 _CACHED_GROQ_CLIENT = Groq(api_key=self.api_key)
             self.client = _CACHED_GROQ_CLIENT
