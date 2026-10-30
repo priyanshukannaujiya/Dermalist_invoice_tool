@@ -59,6 +59,11 @@ function getDatabaseUrl(): string {
 export function getPool(): Pool {
   if (!global._neonPool) {
     const connectionString = getDatabaseUrl();
+    if (!connectionString) {
+      throw new Error(
+        "DATABASE_URL is not configured. Please add DATABASE_URL to your environment variables (e.g. in Vercel Project Settings)."
+      );
+    }
     global._neonPool = new Pool({
       connectionString,
       ssl: connectionString.includes("sslmode=require") || connectionString.includes("neon.tech")
@@ -76,6 +81,7 @@ let isInitialized = false;
 
 export async function initDatabase(): Promise<void> {
   if (isInitialized) return;
+  if (!getDatabaseUrl()) return;
   const pool = getPool();
   try {
     // 1. Ensure creators table exists with all required fields

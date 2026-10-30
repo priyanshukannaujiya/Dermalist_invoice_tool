@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCreatorById, updateCreator, deleteCreator } from "@/lib/db";
 import { PAN_REGEX, IFSC_REGEX, UDYAM_REGEX } from "@/lib/utils";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }

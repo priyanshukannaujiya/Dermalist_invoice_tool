@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCreators, createCreator } from "@/lib/db";
 import { PAN_REGEX, IFSC_REGEX, UDYAM_REGEX } from "@/lib/utils";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);

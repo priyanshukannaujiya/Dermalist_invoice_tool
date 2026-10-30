@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { parseCreatorCsv, parseCreatorExcel, normalizeRawRow } from "@/lib/creator-importer";
 import { bulkUpsertCreators, Creator } from "@/lib/db";
 
+export const dynamic = "force-dynamic";
+
 export async function POST(req: NextRequest) {
   try {
     const contentType = req.headers.get("content-type") || "";

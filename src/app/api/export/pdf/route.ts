@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { generateInvoicePdfBuffer } from "@/lib/pdf";
 import { InvoiceExcelPayload } from "@/lib/excel";
 
+export const dynamic = "force-dynamic";
+
 export async function POST(req: NextRequest) {
   try {
     const body: InvoiceExcelPayload = await req.json();

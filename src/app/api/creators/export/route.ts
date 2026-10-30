@@ -3,6 +3,8 @@ import { getCreators } from "@/lib/db";
 import Papa from "papaparse";
 import * as XLSX from "xlsx";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
