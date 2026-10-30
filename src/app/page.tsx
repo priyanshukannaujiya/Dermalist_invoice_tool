@@ -19,6 +19,7 @@ export default function StudioPage() {
   const [missingModalOpen, setMissingModalOpen] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [pendingCreatorName, setPendingCreatorName] = useState("");
+  const [pendingCreatorProfile, setPendingCreatorProfile] = useState<Partial<CreatorProfile> | null>(null);
 
   const [invoice, setInvoice] = useState<InvoiceDraft>({
     invoice_number: "DL-001",
@@ -149,6 +150,7 @@ export default function StudioPage() {
 
     if (data.requiresCreatorDetails && data.creatorName) {
       setPendingCreatorName(data.creatorName);
+      setPendingCreatorProfile(updatedCreator);
       setMissingModalOpen(true);
     }
   };
@@ -262,6 +264,7 @@ export default function StudioPage() {
               isLoading={isLoading}
               onEditCreator={() => {
                 setPendingCreatorName(invoice.creator?.name || "Creator");
+                setPendingCreatorProfile(invoice.creator);
                 setMissingModalOpen(true);
               }}
               onSyncCreator={handleSyncCreator}
@@ -273,9 +276,12 @@ export default function StudioPage() {
       {/* Missing Creator Detail Modal */}
       <MissingCreatorModal
         isOpen={missingModalOpen}
-        onClose={() => setMissingModalOpen(false)}
+        onClose={() => {
+          setMissingModalOpen(false);
+          setPendingCreatorProfile(null);
+        }}
         creatorName={pendingCreatorName || invoice.creator?.name || ""}
-        initialCreator={invoice.creator}
+        initialCreator={pendingCreatorProfile || invoice.creator}
         onSaveCreator={handleMissingCreatorSaved}
       />
 

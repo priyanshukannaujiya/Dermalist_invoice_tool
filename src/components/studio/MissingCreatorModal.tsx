@@ -4,7 +4,7 @@ import React, { useState } from "react";
 import { CreatorProfile } from "@/types/invoice";
 import { UserPlus, X, Save, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
-import { PAN_REGEX, IFSC_REGEX } from "@/lib/utils";
+import { PAN_REGEX, IFSC_REGEX, IFSC_BANK_MAP } from "@/lib/utils";
 
 interface MissingCreatorModalProps {
   isOpen: boolean;
@@ -185,7 +185,16 @@ export function MissingCreatorModal({
               type="text"
               placeholder="HDFC0000123"
               value={formData.ifsc || ""}
-              onChange={(e) => setFormData({ ...formData, ifsc: e.target.value.toUpperCase() })}
+              onChange={(e) => {
+                const val = e.target.value.toUpperCase();
+                const prefix = val.substring(0, 4);
+                const inferredBank = IFSC_BANK_MAP[prefix];
+                setFormData((prev) => ({
+                  ...prev,
+                  ifsc: val,
+                  bank_name: !prev.bank_name && inferredBank ? inferredBank : prev.bank_name,
+                }));
+              }}
               className="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg font-mono uppercase"
             />
           </div>

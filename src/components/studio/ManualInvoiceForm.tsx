@@ -14,6 +14,7 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { toast } from "sonner";
+import { IFSC_BANK_MAP } from "@/lib/utils";
 
 interface ManualInvoiceFormProps {
   invoice: InvoiceDraft;
@@ -412,7 +413,23 @@ export function ManualInvoiceForm({
                 <input
                   type="text"
                   value={invoice.creator?.ifsc || ""}
-                  onChange={(e) => handleCreatorFieldChange("ifsc", e.target.value.toUpperCase())}
+                  onChange={(e) => {
+                    const val = e.target.value.toUpperCase();
+                    const prefix = val.substring(0, 4);
+                    const inferred = IFSC_BANK_MAP[prefix];
+                    if (!invoice.creator?.bank_name && inferred) {
+                      onChange({
+                        ...invoice,
+                        creator: {
+                          ...(invoice.creator || { name: "" }),
+                          ifsc: val,
+                          bank_name: inferred,
+                        },
+                      });
+                    } else {
+                      handleCreatorFieldChange("ifsc", val);
+                    }
+                  }}
                   placeholder="HDFC0000123"
                   className="w-full font-mono uppercase rounded-lg border border-slate-300 px-2.5 py-1.5 bg-white text-xs"
                 />

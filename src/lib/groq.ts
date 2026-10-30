@@ -1,6 +1,7 @@
 import Groq from "groq-sdk";
 import { findCreatorByName, Creator } from "./db";
-import { formatDateDDMMYYYY } from "./utils";
+import { formatDateDDMMYYYY, IFSC_BANK_MAP } from "./utils";
+export { IFSC_BANK_MAP };
 
 export interface ParsedInvoiceData {
   creatorName: string | null;
@@ -25,38 +26,6 @@ const FALLBACK_MODELS = [
   "openai/gpt-oss-20b",
 ];
 
-export const IFSC_BANK_MAP: Record<string, string> = {
-  HDFC: "HDFC Bank",
-  ICIC: "ICICI Bank",
-  SBIN: "State Bank of India",
-  UTIB: "Axis Bank",
-  KKBK: "Kotak Mahindra Bank",
-  PUNB: "Punjab National Bank",
-  BARB: "Bank of Baroda",
-  CNRB: "Canara Bank",
-  UBIN: "Union Bank of India",
-  INDB: "IndusInd Bank",
-  YESB: "Yes Bank",
-  IDFB: "IDFC First Bank",
-  FDRL: "Federal Bank",
-  BKID: "Bank of India",
-  IDIB: "Indian Bank",
-  IOBA: "Indian Overseas Bank",
-  MAHB: "Bank of Maharashtra",
-  PSIB: "Punjab & Sind Bank",
-  CBIN: "Central Bank of India",
-  UCBA: "UCO Bank",
-  CORP: "Corporation Bank",
-  ANDB: "Andhra Bank",
-  ALLA: "Allahabad Bank",
-  SYNB: "Syndicate Bank",
-  VIJB: "Vijaya Bank",
-  ORBC: "Oriental Bank of Commerce",
-  PAYT: "Paytm Payments Bank",
-  AIRP: "Airtel Payments Bank",
-  IPOS: "India Post Payments Bank",
-};
-
 export const KNOWN_BANKS = [
   "State Bank of India",
   "HDFC Bank",
@@ -80,42 +49,82 @@ export const KNOWN_BANKS = [
   "Bank of Maharashtra",
   "Central Bank of India",
   "UCO Bank",
+  "IDBI Bank",
+  "Bandhan Bank",
+  "RBL Bank",
+  "AU Small Finance Bank",
+  "South Indian Bank",
+  "Karnataka Bank",
+  "Karur Vysya Bank",
+  "City Union Bank",
+  "Tamilnad Mercantile Bank",
+  "Standard Chartered Bank",
+  "HSBC Bank",
+  "Citibank",
+  "DBS Bank",
+  "Saraswat Bank",
+  "Cosmos Bank",
+  "Equitas Small Finance Bank",
+  "Ujjivan Small Finance Bank",
+  "Dhanlaxmi Bank",
+  "CSB Bank",
+  "Punjab & Sind Bank",
   "Paytm Payments Bank",
   "Airtel Payments Bank",
 ];
 
 export function extractBankName(prompt: string, ifsc?: string | null): string | null {
-  if (!prompt) return null;
+  if (!prompt && !ifsc) return null;
 
-  // 1. Explicit keyword match (supports commas, newlines, voice dictation: "bank name HDFC Bank", "bank is State Bank of India", "in ICICI Bank", "bank: Axis Bank")
-  const explicitMatch = prompt.match(
-    /(?:^|\n|[,;]|\b)(?:bank(?:\s*name)?(?:\s*is)?|in\s*bank)\s*[:=-]?\s*([A-Za-z\s&]{2,35}?)(?=[,;\n\r]|(?:\b(?:a\/?c|account|acc|no|ifsc|code|pan|upi|phone|mobile|contact|for|dated|amount|₹|rs|balance)\b)|$)/i
-  );
-  if (explicitMatch && explicitMatch[1]?.trim()) {
-    const candidate = explicitMatch[1].trim();
-    const cleaned = candidate.replace(/\s+(?:account|a\/c|branch|no)$/i, "").trim();
-    if (cleaned.length >= 2 && !/^(?:is|the|of|a|an|details?)$/i.test(cleaned)) {
-      return cleaned;
+  if (prompt) {
+    // 1. Explicit keyword match
+    // Handles:
+    // "Bank Details: HDFC Bank", "Bank Name: State Bank of India", "Name of Bank: ICICI Bank",
+    // "Bank: Axis Bank", "Bank is Kotak Mahindra Bank", "In bank Canara Bank", "Bank - IDBI Bank"
+    const explicitMatch =
+      prompt.match(
+        /(?:^|\n|[,;]|\b)(?:(?:name\s*of\s*bank|bank(?:\s*name)?|bank\s*details?)(?:\s*is)?|in\s*bank)\s*[:=-]?\s*([A-Za-z0-9\s&.]{2,40}?)(?=[,;\n\r]|(?:\b(?:a\/?c|account|acc|no|ifsc|code|pan|upi|phone|mobile|contact|for|dated|amount|₹|rs|balance)\b)|$)/i
+      ) ||
+      prompt.match(
+        /(?:^|\n)\s*(?:(?:name\s*of\s*bank|bank(?:\s*name)?|bank\s*details?)(?:\s*is)?)\s*[:=-]?\s*([^\n\r]+)/i
+      );
+
+    if (explicitMatch && explicitMatch[1]?.trim()) {
+      let candidate = explicitMatch[1].trim();
+      candidate = candidate.replace(/\s+(?:account|a\/c|branch|no|details)$/i, "").trim();
+      candidate = candidate.replace(/^[-:= ]+/, "").trim();
+      if (candidate.length >= 2 && !/^(?:is|the|of|a|an|details?)$/i.test(candidate)) {
+        if (/^SBI$/i.test(candidate)) return "State Bank of India";
+        if (/^HDFC$/i.test(candidate)) return "HDFC Bank";
+        if (/^ICICI$/i.test(candidate)) return "ICICI Bank";
+        if (/^KOTAK$/i.test(candidate)) return "Kotak Mahindra Bank";
+        if (/^AXIS$/i.test(candidate)) return "Axis Bank";
+        if (/^PNB$/i.test(candidate)) return "Punjab National Bank";
+        if (/^BOB$/i.test(candidate)) return "Bank of Baroda";
+        if (/^IDBI$/i.test(candidate)) return "IDBI Bank";
+        return candidate;
+      }
     }
-  }
 
-  // 2. Check for known Indian bank names mentioned anywhere in prompt/voice
-  for (const b of KNOWN_BANKS) {
-    const escaped = b.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const regex = new RegExp(`\\b${escaped}\\b`, "i");
-    if (regex.test(prompt)) {
-      return b;
+    // 2. Check for known Indian bank names mentioned anywhere in prompt/voice
+    for (const b of KNOWN_BANKS) {
+      const escaped = b.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const regex = new RegExp(`\\b${escaped}\\b`, "i");
+      if (regex.test(prompt)) {
+        return b;
+      }
     }
-  }
 
-  // Common bank abbreviations
-  if (/\bSBI\b/i.test(prompt)) return "State Bank of India";
-  if (/\bPNB\b/i.test(prompt)) return "Punjab National Bank";
-  if (/\bBOB\b/i.test(prompt)) return "Bank of Baroda";
-  if (/\bHDFC\b/i.test(prompt)) return "HDFC Bank";
-  if (/\bICICI\b/i.test(prompt)) return "ICICI Bank";
-  if (/\bKOTAK\b/i.test(prompt)) return "Kotak Mahindra Bank";
-  if (/\bAXIS\b/i.test(prompt)) return "Axis Bank";
+    // Common bank abbreviations
+    if (/\bSBI\b/i.test(prompt)) return "State Bank of India";
+    if (/\bPNB\b/i.test(prompt)) return "Punjab National Bank";
+    if (/\bBOB\b/i.test(prompt)) return "Bank of Baroda";
+    if (/\bHDFC\b/i.test(prompt)) return "HDFC Bank";
+    if (/\bICICI\b/i.test(prompt)) return "ICICI Bank";
+    if (/\bKOTAK\b/i.test(prompt)) return "Kotak Mahindra Bank";
+    if (/\bAXIS\b/i.test(prompt)) return "Axis Bank";
+    if (/\bIDBI\b/i.test(prompt)) return "IDBI Bank";
+  }
 
   // 3. Fallback: Auto-infer bank name from IFSC code prefix if IFSC is present
   if (ifsc && typeof ifsc === "string" && ifsc.length >= 4) {
@@ -132,14 +141,11 @@ const SYSTEM_PROMPT = `
 You are an expert AI Invoice Assistant specialized in extracting invoice details for Dermalist creator billings.
 Your role is to analyze conversational requests or structured creator briefs (including speech/voice inputs) and extract the billing details into a clean JSON object.
 
-SECURITY / PRIVACY RULE:
-Do NOT extract or store sensitive bank account credentials if they appear; focus on creator name, billing address, bank name, services rendered, and commercial amounts.
-
 Required JSON Output Schema:
 {
   "creatorName": string or null (full name of creator/influencer, e.g. "Neha Patil", "Aaditi Raut", "Sneha Patil"),
-  "creatorAddress": string or null (full billing address or residence if mentioned in the prompt, or null),
-  "bankName": string or null (name of creator's bank if stated or spoken, e.g. "HDFC Bank", "ICICI Bank", "State Bank of India", "Axis Bank", "Kotak Mahindra Bank", or null),
+  "creatorAddress": string or null (full complete billing address with house/flat, street, area, city, state, pin code),
+  "bankName": string or null (name of creator's bank if stated or spoken, e.g. "HDFC Bank", "ICICI Bank", "State Bank of India", "Axis Bank", "Kotak Mahindra Bank", "Bank of Baroda", or null),
   "date": string or null (invoice date mentioned or null, e.g. "29-10-2026" or "29 Oct 2026"),
   "description": string (service description, e.g. "Promotional Video for Dermalist" or "Brand Collaboration Services"),
   "taxableValue": number (numeric value in INR before discount, e.g. 2500, default 0 if not mentioned),
@@ -153,7 +159,9 @@ Rules:
 1. Parse rupee symbols (₹, Rs, INR, k/K e.g. 2.5k -> 2500, ₹2,500 -> 2500) accurately into numeric values.
 2. If quantity is specified (e.g. "2 reels", "one video"), extract quantity as integer and adjust taxableValue if it is a total or per unit.
 3. If no price is mentioned, set taxableValue to 0.
-4. If bank name is mentioned in the voice or text (e.g. "bank is HDFC", "ICICI Bank", "SBI account"), extract bankName.
+4. Extract creatorName, full creatorAddress, and bankName:
+   - For creatorAddress: Always preserve the full address (including apartment, street, area, city, state, pin code). Do not truncate at commas.
+   - For bankName: Always extract the bank name if mentioned anywhere (e.g. "bank is HDFC", "ICICI Bank", "SBI", "Bank Details: Kotak Bank", "Bank: Axis Bank", etc.).
 5. Respond ONLY with valid JSON.
 `;
 
@@ -182,15 +190,23 @@ function extractLocalCredentials(prompt: string) {
     ? phoneGenericMatch[1]
     : null;
 
-  const nameLineMatch = prompt.match(
-    /(?:^|\n|[,;]|\s)(?:creator(?:\s*name)?|influencer|name|bill\s*to)\s*[:=-]\s*([^\n\r,]+)/i
-  );
-  const name = nameLineMatch ? nameLineMatch[1].trim() : null;
+  const nameLineMatch =
+    prompt.match(/(?:^|\n)\s*(?<!\b(?:bank|account|holder|user)\s*)(?:creator(?:\s*name)?|influencer|bill\s*to)\s*[:=-]?\s*([^\n\r]+)/i) ||
+    prompt.match(/(?:^|\n|[,;]|\s)(?<!\b(?:bank|account|holder|user)\s*)(?:creator(?:\s*name)?|influencer|bill\s*to)\s*[:=-]\s*([^\n\r,]+)/i);
+  let name = nameLineMatch ? nameLineMatch[1].trim() : null;
+  if (name && (/\bbank\b/i.test(name) || /^(?:is|the|of|a|an|details?)$/i.test(name))) {
+    name = null;
+  }
 
-  const addrLineMatch = prompt.match(
-    /(?:^|\n|[,;]|\s)(?:address|location|residence)\s*[:=-]\s*([^\n\r,]+)/i
+  // Address: support full multi-comma addresses on a line or inline before next keyword
+  const lineAddrMatch = prompt.match(
+    /(?:^|\n)\s*(?:address|location|residence|residing\s*at)\s*[:=-]?\s*([^\n\r]+)/i
   );
-  const address = addrLineMatch ? addrLineMatch[1].trim() : null;
+  const inlineAddrMatch = prompt.match(
+    /(?:^|\n|[,;]|\b)(?:address|location|residence|residing\s*at)\s*[:=-]?\s*([^\n\r]+?)(?=(?:\b(?:bank|a\/?c|account|acc|no|ifsc|code|pan|upi|phone|mobile|contact|for|dated|amount|₹|rs|balance)\b|[\n\r]|$))/i
+  );
+  const rawAddr = lineAddrMatch ? lineAddrMatch[1] : inlineAddrMatch ? inlineAddrMatch[1] : null;
+  const address = rawAddr ? rawAddr.trim().replace(/[,;]+$/, "").trim() : null;
 
   const bank_name = extractBankName(prompt, ifscMatch ? ifscMatch[1] : null);
 
@@ -314,14 +330,35 @@ export async function parseInvoiceWithGroq(prompt: string): Promise<ParsedInvoic
     }
   }
 
-  // Determine final creator name, address, and bank name (prefer explicit user-provided lines or LLM extraction)
-  const finalCreatorName = localCreds.name || extracted.creatorName?.trim() || null;
-  const finalAddress = localCreds.address || extracted.creatorAddress?.trim() || "";
-  const finalBankName =
-    localCreds.bank_name ||
-    extracted.bankName?.trim() ||
-    extractBankName(prompt, localCreds.ifsc) ||
-    "";
+  // Determine final creator name
+  let finalCreatorName = localCreds.name || extracted.creatorName?.trim() || null;
+  if (finalCreatorName && /\bbank\b/i.test(finalCreatorName)) {
+    if (extracted.creatorName && !/\bbank\b/i.test(extracted.creatorName)) {
+      finalCreatorName = extracted.creatorName.trim();
+    } else {
+      finalCreatorName = null;
+    }
+  }
+
+  // Address: Pick the longest and most complete address between local extraction and LLM extraction
+  const regexAddr = (localCreds.address || "").trim();
+  const llmAddr = (extracted.creatorAddress || "").trim();
+  const finalAddress = regexAddr.length >= llmAddr.length ? regexAddr : llmAddr;
+
+  // Bank Name: Combine regex extraction, LLM extraction, and IFSC code inference
+  const regexBank = (localCreds.bank_name || "").trim();
+  const llmBank = (extracted.bankName || "").trim();
+  const ifscInferredBank = extractBankName("", localCreds.ifsc) || "";
+
+  let finalBankName = regexBank || llmBank || ifscInferredBank || "";
+  if (/^SBI$/i.test(finalBankName)) finalBankName = "State Bank of India";
+  if (/^HDFC$/i.test(finalBankName)) finalBankName = "HDFC Bank";
+  if (/^ICICI$/i.test(finalBankName)) finalBankName = "ICICI Bank";
+  if (/^KOTAK$/i.test(finalBankName)) finalBankName = "Kotak Mahindra Bank";
+  if (/^AXIS$/i.test(finalBankName)) finalBankName = "Axis Bank";
+  if (/^PNB$/i.test(finalBankName)) finalBankName = "Punjab National Bank";
+  if (/^BOB$/i.test(finalBankName)) finalBankName = "Bank of Baroda";
+  if (/^IDBI$/i.test(finalBankName)) finalBankName = "IDBI Bank";
 
   const taxableValue = Math.max(0, parseFloat(extracted.taxableValue) || 0);
   const discount = Math.max(0, parseFloat(extracted.discount) || 0);
