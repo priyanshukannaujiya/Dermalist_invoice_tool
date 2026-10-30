@@ -1,9 +1,22 @@
 "use client";
 
-import React, { useState } from "react";
-import { Sparkles, Send, ShieldCheck, CheckCircle2, AlertTriangle, ArrowRight } from "lucide-react";
+import React, { useState, useEffect } from "react";
+import {
+  Sparkles,
+  Send,
+  ShieldCheck,
+  CheckCircle2,
+  AlertTriangle,
+  ArrowRight,
+  UploadCloud,
+  Users,
+  ChevronDown,
+  Building,
+  CreditCard,
+  Check,
+} from "lucide-react";
 import { toast } from "sonner";
-import { InvoiceDraft } from "@/types/invoice";
+import { InvoiceDraft, CreatorProfile } from "@/types/invoice";
 
 interface AIPromptStudioProps {
   onParsed: (data: any) => void;
@@ -11,6 +24,8 @@ interface AIPromptStudioProps {
   setIsLoading: (val: boolean) => void;
   botReply: string | null;
   currentInvoice: InvoiceDraft;
+  onSelectCreator?: (creator: CreatorProfile) => void;
+  onOpenImportModal?: () => void;
 }
 
 const SAMPLE_PROMPTS = [
@@ -25,8 +40,33 @@ export function AIPromptStudio({
   setIsLoading,
   botReply,
   currentInvoice,
+  onSelectCreator,
+  onOpenImportModal,
 }: AIPromptStudioProps) {
   const [prompt, setPrompt] = useState("");
+  const [creatorsList, setCreatorsList] = useState<CreatorProfile[]>([]);
+  const [showPicker, setShowPicker] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/creators?limit=50")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.creators) setCreatorsList(data.creators);
+      })
+      .catch((err) => console.error("Error fetching creators for prompt studio:", err));
+  }, []);
+
+  const handleSelectCreator = (c: CreatorProfile) => {
+    if (onSelectCreator) {
+      onSelectCreator(c);
+      toast.success(`Attached ${c.name}'s verified bank details!`);
+    }
+    setShowPicker(false);
+    // Optionally pre-fill prompt if empty
+    if (!prompt.trim()) {
+      setPrompt(`Generate invoice for ${c.name} for ₹2,500 for one promotional video.`);
+    }
+  };
 
   const handleGenerate = async (textToUse?: string) => {
     const text = (textToUse || prompt).trim();
@@ -62,8 +102,10 @@ export function AIPromptStudio({
     }
   };
 
+  const currentCreator = currentInvoice.creator;
+
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       {/* Privacy guarantee banner */}
       <div className="bg-emerald-50/80 border border-emerald-200/80 rounded-xl p-3 flex items-start gap-2.5 text-xs text-emerald-900">
         <ShieldCheck className="w-4 h-4 text-emerald-600 mt-0.5 shrink-0" />
@@ -72,6 +114,77 @@ export function AIPromptStudio({
           financials (Bank Account Number, IFSC, PAN, UPI) are <strong>never</strong> transmitted to
           Groq or any LLM. They are queried securely on the server from PostgreSQL.
         </div>
+      </div>
+
+      {/* Creator Quick Selector & Import Toolbar */}
+      <div className="bg-white border border-slate-200 rounded-2xl p-3.5 shadow-xs flex flex-wrap items-center justify-between gap-2.5 text-xs">
+        <div className="relative flex-1 min-w-[200px]">
+          <button
+            type="button"
+            onClick={() => setShowPicker(!showPicker)}
+            className="w-full text-left bg-slate-50 hover:bg-slate-100/80 border border-slate-300 rounded-xl px-3 py-2 flex items-center justify-between transition-colors cursor-pointer"
+          >
+            <div className="flex items-center gap-2 truncate">
+              <Users className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+              <span className="truncate text-slate-800 font-medium">
+                {currentCreator?.name ? (
+                  <>
+                    <strong className="text-slate-900">{currentCreator.name}</strong>
+                    {currentCreator.bank_account && (
+                      <span className="text-slate-500 text-[11px] ml-1.5 font-mono">
+                        (•••• {currentCreator.bank_account.slice(-4)})
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  <span className="text-slate-500">Pick from Uploaded Creators ({creatorsList.length})...</span>
+                )}
+              </span>
+            </div>
+            <ChevronDown className={`w-3.5 h-3.5 text-slate-400 shrink-0 transition-transform ${showPicker ? "rotate-180" : ""}`} />
+          </button>
+
+          {/* Quick Dropdown */}
+          {showPicker && (
+            <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-xl z-30 max-h-56 overflow-y-auto divide-y divide-slate-100">
+              <div className="p-2 bg-slate-50 text-[11px] text-slate-500 font-medium">
+                Click any creator to bind their bank credentials:
+              </div>
+              {creatorsList.map((c) => (
+                <button
+                  key={c.id || c.name}
+                  type="button"
+                  onClick={() => handleSelectCreator(c)}
+                  className="w-full text-left p-2.5 hover:bg-emerald-50 transition-colors flex items-center justify-between text-xs cursor-pointer group"
+                >
+                  <div>
+                    <div className="font-semibold text-slate-900 group-hover:text-emerald-950">
+                      {c.name}
+                    </div>
+                    <div className="text-[10px] text-slate-500 font-mono">
+                      {c.bank_name ? `${c.bank_name} • ` : ""}
+                      {c.bank_account ? `A/C •••• ${c.bank_account.slice(-4)}` : "A/C not on file"}
+                    </div>
+                  </div>
+                  {currentCreator?.name === c.name && (
+                    <Check className="w-3.5 h-3.5 text-emerald-600" />
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {onOpenImportModal && (
+          <button
+            type="button"
+            onClick={onOpenImportModal}
+            className="inline-flex items-center gap-1.5 px-3 py-2 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 rounded-xl font-semibold transition-colors cursor-pointer text-xs shrink-0"
+          >
+            <UploadCloud className="w-3.5 h-3.5 text-emerald-700" />
+            <span>Upload (CSV/Excel)</span>
+          </button>
+        )}
       </div>
 
       {/* Prompt input card */}

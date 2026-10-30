@@ -2,8 +2,37 @@ import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import { formatCurrencyINR } from "./utils";
 import { InvoiceExcelPayload } from "./excel";
+import { getCreatorByNameOrId } from "./db";
 
 export async function generateInvoicePdfBuffer(data: InvoiceExcelPayload): Promise<Buffer> {
+  // Fetch authoritative creator details and bank account from database
+  let c = { ...data.creator };
+  if (c.id || c.name) {
+    try {
+      const dbCreator = await getCreatorByNameOrId(c.id, c.name);
+      if (dbCreator) {
+        c = {
+          ...c,
+          id: dbCreator.id,
+          name: c.name || dbCreator.name,
+          address: c.address || dbCreator.address || "",
+          email: c.email || dbCreator.email || "",
+          phone: c.phone || dbCreator.phone || "",
+          pan: dbCreator.pan || c.pan || "",
+          upi_id: dbCreator.upi_id || c.upi_id || "",
+          bank_account: dbCreator.bank_account || c.bank_account || "",
+          ifsc: dbCreator.ifsc || c.ifsc || "",
+          account_holder: dbCreator.account_holder || c.account_holder || dbCreator.name,
+          bank_name: dbCreator.bank_name || c.bank_name || "",
+          is_msme: dbCreator.is_msme ?? c.is_msme ?? false,
+          msme_registration_no: dbCreator.msme_registration_no || c.msme_registration_no || "",
+        };
+      }
+    } catch (err) {
+      console.warn("PDF export: Creator database enrichment error:", err);
+    }
+  }
+
   const doc = new jsPDF({
     orientation: "portrait",
     unit: "pt",
@@ -29,7 +58,6 @@ export async function generateInvoicePdfBuffer(data: InvoiceExcelPayload): Promi
   doc.text("NON-GST INVOICE FOR CREATOR SERVICES", pageWidth / 2, 78, { align: "center" });
 
   // 2. Creator Details (Left) and Invoice Metadata (Right)
-  const c = data.creator;
   let y = 105;
 
   // Left column: Creator Info

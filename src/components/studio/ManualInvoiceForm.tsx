@@ -2,15 +2,30 @@
 
 import React, { useState, useEffect } from "react";
 import { InvoiceDraft, CreatorProfile } from "@/types/invoice";
-import { Search, UserCheck, Shield, Building, CreditCard, ChevronDown } from "lucide-react";
+import {
+  Search,
+  UserCheck,
+  Shield,
+  Building,
+  CreditCard,
+  ChevronDown,
+  UploadCloud,
+  CheckCircle2,
+  AlertCircle,
+} from "lucide-react";
 import { toast } from "sonner";
 
 interface ManualInvoiceFormProps {
   invoice: InvoiceDraft;
   onChange: (updated: InvoiceDraft) => void;
+  onOpenImportModal?: () => void;
 }
 
-export function ManualInvoiceForm({ invoice, onChange }: ManualInvoiceFormProps) {
+export function ManualInvoiceForm({
+  invoice,
+  onChange,
+  onOpenImportModal,
+}: ManualInvoiceFormProps) {
   const [creatorsList, setCreatorsList] = useState<CreatorProfile[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [isSearching, setIsSearching] = useState(false);
@@ -23,7 +38,7 @@ export function ManualInvoiceForm({ invoice, onChange }: ManualInvoiceFormProps)
     const fetchCreators = async () => {
       try {
         setIsSearching(true);
-        const res = await fetch(`/api/creators?limit=20&search=${encodeURIComponent(searchTerm)}`);
+        const res = await fetch(`/api/creators?limit=25&search=${encodeURIComponent(searchTerm)}`);
         if (res.ok && active) {
           const data = await res.json();
           setCreatorsList(data.creators || []);
@@ -64,7 +79,7 @@ export function ManualInvoiceForm({ invoice, onChange }: ManualInvoiceFormProps)
     });
     setSearchTerm(creator.name);
     setShowDropdown(false);
-    toast.success(`Selected ${creator.name} — profile details loaded!`);
+    toast.success(`Selected ${creator.name} — profile & bank details loaded!`);
   };
 
   const handleFieldChange = (field: keyof InvoiceDraft, value: any) => {
@@ -104,24 +119,57 @@ export function ManualInvoiceForm({ invoice, onChange }: ManualInvoiceFormProps)
     });
   };
 
+  const handleNameBlur = async () => {
+    setTimeout(async () => {
+      setShowDropdown(false);
+      const typedName = (searchTerm || invoice.creator?.name || "").trim();
+      if (!typedName) return;
+
+      // Check if matches an existing creator in the fetched list
+      const matched = creatorsList.find(
+        (c) => c.name.toLowerCase() === typedName.toLowerCase()
+      );
+      if (matched && matched.id !== invoice.creator?.id) {
+        handleSelectCreator(matched);
+      }
+    }, 250);
+  };
+
+  const c = invoice.creator || { name: "" };
+  const hasBankDetails = Boolean(c.bank_account && c.ifsc);
+
   return (
     <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-5">
-      {/* 1. Creator Autocomplete Search */}
+      {/* 1. Creator Autocomplete Search & Quick Import */}
       <div className="space-y-1.5 relative">
-        <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-          <UserCheck className="w-4 h-4 text-emerald-600" />
-          <span>Creator / Influencer Search</span>
-        </label>
+        <div className="flex items-center justify-between">
+          <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+            <UserCheck className="w-4 h-4 text-emerald-600" />
+            <span>Creator / Influencer Search</span>
+          </label>
+          {onOpenImportModal && (
+            <button
+              type="button"
+              onClick={onOpenImportModal}
+              className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 px-2.5 py-1 rounded-lg border border-emerald-200 transition-colors cursor-pointer"
+            >
+              <UploadCloud className="w-3.5 h-3.5" />
+              <span>Upload CSV/Excel</span>
+            </button>
+          )}
+        </div>
+
         <div className="relative">
           <input
             type="text"
-            value={searchTerm || invoice.creator?.name || ""}
+            value={searchTerm !== "" ? searchTerm : (invoice.creator?.name || "")}
             onChange={(e) => {
               setSearchTerm(e.target.value);
               setShowDropdown(true);
               handleCreatorFieldChange("name", e.target.value);
             }}
             onFocus={() => setShowDropdown(true)}
+            onBlur={handleNameBlur}
             placeholder="Type creator name to search directory..."
             className="w-full text-sm rounded-xl border border-slate-300 pl-9 pr-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
           />
@@ -130,21 +178,58 @@ export function ManualInvoiceForm({ invoice, onChange }: ManualInvoiceFormProps)
 
         {/* Dropdown list */}
         {showDropdown && creatorsList.length > 0 && (
-          <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-lg z-20 max-h-48 overflow-y-auto">
-            {creatorsList.map((c) => (
+          <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-xl z-30 max-h-56 overflow-y-auto">
+            {creatorsList.map((cr) => (
               <button
-                key={c.id}
+                key={cr.id}
                 type="button"
-                onClick={() => handleSelectCreator(c)}
-                className="w-full text-left px-3.5 py-2.5 hover:bg-emerald-50 text-xs border-b border-slate-100 last:border-b-0 flex items-center justify-between"
+                onMouseDown={() => handleSelectCreator(cr)}
+                className="w-full text-left px-3.5 py-2.5 hover:bg-emerald-50 text-xs border-b border-slate-100 last:border-b-0 flex items-center justify-between cursor-pointer"
               >
                 <div>
-                  <span className="font-semibold text-slate-900">{c.name}</span>
-                  <span className="text-slate-500 ml-2">PAN: {c.pan || "N/A"}</span>
+                  <div className="font-semibold text-slate-900">{cr.name}</div>
+                  <div className="text-slate-500 text-[11px] font-mono mt-0.5">
+                    {cr.bank_name ? `${cr.bank_name} • ` : ""}
+                    {cr.bank_account ? `A/C •••• ${cr.bank_account.slice(-4)}` : "A/C N/A"}
+                    {cr.pan ? ` • PAN: ${cr.pan}` : ""}
+                  </div>
                 </div>
-                <span className="text-[11px] text-emerald-600 font-medium">Select</span>
+                <span className="text-[11px] text-emerald-600 font-semibold bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                  Select
+                </span>
               </button>
             ))}
+          </div>
+        )}
+
+        {/* Bank Credentials Summary Badge */}
+        {c.name && (
+          <div className="mt-2 p-2.5 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between text-xs">
+            <div className="flex items-center gap-2">
+              <CreditCard className="w-4 h-4 text-emerald-600 shrink-0" />
+              <div className="text-[11px] text-slate-700">
+                {hasBankDetails ? (
+                  <span>
+                    <strong>Bank:</strong> {c.bank_name || "Bank"} &bull;{" "}
+                    <strong>A/C:</strong> {c.bank_account} &bull;{" "}
+                    <strong>IFSC:</strong> {c.ifsc}
+                  </span>
+                ) : (
+                  <span className="text-amber-700 font-medium flex items-center gap-1">
+                    <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
+                    Bank credentials incomplete for {c.name}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowBankDetails(!showBankDetails)}
+              className="text-emerald-700 hover:text-emerald-800 font-semibold text-[11px] underline cursor-pointer shrink-0"
+            >
+              {showBankDetails ? "Hide" : "Edit"}
+            </button>
           </div>
         )}
       </div>
@@ -160,18 +245,20 @@ export function ManualInvoiceForm({ invoice, onChange }: ManualInvoiceFormProps)
             className="w-full text-sm font-mono rounded-xl border border-slate-300 px-3 py-2 focus:ring-2 focus:ring-emerald-500"
           />
         </div>
+
         <div className="space-y-1">
           <label className="text-xs font-semibold text-slate-700">Invoice Date (DD-MM-YYYY)</label>
           <input
             type="text"
             value={invoice.invoice_date}
             onChange={(e) => handleFieldChange("invoice_date", e.target.value)}
+            placeholder="29-10-2026"
             className="w-full text-sm rounded-xl border border-slate-300 px-3 py-2 focus:ring-2 focus:ring-emerald-500"
           />
         </div>
       </div>
 
-      {/* 3. Service Description & Link */}
+      {/* 3. Deliverable / Video Description & Link */}
       <div className="space-y-3">
         <div className="space-y-1">
           <label className="text-xs font-semibold text-slate-700">Service Description</label>
@@ -179,62 +266,67 @@ export function ManualInvoiceForm({ invoice, onChange }: ManualInvoiceFormProps)
             type="text"
             value={invoice.service_description}
             onChange={(e) => handleFieldChange("service_description", e.target.value)}
-            placeholder="e.g. One promotional video for Dermalist"
+            placeholder="1 x Promotional Video for Dermalist"
             className="w-full text-sm rounded-xl border border-slate-300 px-3 py-2 focus:ring-2 focus:ring-emerald-500"
           />
         </div>
+
         <div className="space-y-1">
-          <label className="text-xs font-semibold text-slate-700">Deliverable / Video Link (Optional)</label>
+          <label className="text-xs font-semibold text-slate-700">Deliverable / Video Link</label>
           <input
             type="text"
             value={invoice.video_link || ""}
             onChange={(e) => handleFieldChange("video_link", e.target.value)}
-            placeholder="e.g. https://instagram.com/reel/..."
+            placeholder="https://www.instagram.com/reel/abc123"
             className="w-full text-sm rounded-xl border border-slate-300 px-3 py-2 focus:ring-2 focus:ring-emerald-500"
           />
         </div>
       </div>
 
-      {/* 4. Commercials: Taxable Value & Discount */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-50 p-3.5 rounded-xl border border-slate-200">
+      {/* 4. Financials: Quantity, Price, Discount, Totals */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-50/80 p-3.5 rounded-xl border border-slate-200">
         <div className="space-y-1">
           <label className="text-[11px] font-semibold text-slate-600">Quantity</label>
           <input
             type="number"
             min={1}
             value={invoice.quantity}
-            onChange={(e) => handleFieldChange("quantity", parseInt(e.target.value, 10) || 1)}
-            className="w-full text-sm font-semibold rounded-lg border border-slate-300 px-2.5 py-1.5 bg-white"
+            onChange={(e) => handleFieldChange("quantity", e.target.value)}
+            className="w-full text-sm rounded-lg border border-slate-300 px-2.5 py-1.5 bg-white"
           />
         </div>
+
         <div className="space-y-1">
           <label className="text-[11px] font-semibold text-slate-600">Taxable Value (₹)</label>
           <input
             type="number"
             value={invoice.taxable_value}
-            onChange={(e) => handleFieldChange("taxable_value", parseFloat(e.target.value) || 0)}
-            className="w-full text-sm font-semibold rounded-lg border border-slate-300 px-2.5 py-1.5 bg-white"
+            onChange={(e) => handleFieldChange("taxable_value", e.target.value)}
+            className="w-full text-sm rounded-lg border border-slate-300 px-2.5 py-1.5 bg-white font-mono"
           />
         </div>
+
         <div className="space-y-1">
           <label className="text-[11px] font-semibold text-slate-600">Discount (₹)</label>
           <input
             type="number"
+            min={0}
             value={invoice.discount}
-            onChange={(e) => handleFieldChange("discount", parseFloat(e.target.value) || 0)}
-            className="w-full text-sm font-semibold rounded-lg border border-slate-300 px-2.5 py-1.5 bg-white"
+            onChange={(e) => handleFieldChange("discount", e.target.value)}
+            className="w-full text-sm rounded-lg border border-slate-300 px-2.5 py-1.5 bg-white font-mono"
           />
         </div>
+
         <div className="space-y-1">
-          <label className="text-[11px] font-semibold text-emerald-800">Balance Due (₹)</label>
-          <div className="text-sm font-bold text-emerald-700 py-1.5">
+          <label className="text-[11px] font-bold text-emerald-800">Balance Due (₹)</label>
+          <div className="w-full text-sm font-bold text-emerald-700 bg-emerald-100/60 border border-emerald-300 rounded-lg px-2.5 py-1.5 font-mono">
             ₹{invoice.balance_due.toLocaleString("en-IN")}
           </div>
         </div>
       </div>
 
-      {/* 5. MSME Registered toggle */}
-      <div className="flex items-center justify-between p-3 rounded-xl border border-slate-200 bg-slate-50/70">
+      {/* 5. MSME / UDYAM Registration */}
+      <div className="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-xl">
         <div className="flex items-center gap-2">
           <Shield className="w-4 h-4 text-blue-600" />
           <div>
@@ -246,7 +338,7 @@ export function ManualInvoiceForm({ invoice, onChange }: ManualInvoiceFormProps)
           type="checkbox"
           checked={Boolean(invoice.creator?.is_msme)}
           onChange={(e) => handleCreatorFieldChange("is_msme", e.target.checked)}
-          className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500"
+          className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 cursor-pointer"
         />
       </div>
 
@@ -280,28 +372,30 @@ export function ManualInvoiceForm({ invoice, onChange }: ManualInvoiceFormProps)
         </button>
 
         {showBankDetails && (
-          <div className="mt-3 space-y-3 p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs">
+          <div className="mt-3 space-y-3 p-3.5 bg-slate-50 rounded-xl border border-slate-200 text-xs">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               <div>
-                <label className="text-[11px] font-medium text-slate-600">PAN Number</label>
+                <label className="text-[11px] font-medium text-slate-600">Bank Name</label>
                 <input
                   type="text"
-                  value={invoice.creator?.pan || ""}
-                  onChange={(e) => handleCreatorFieldChange("pan", e.target.value.toUpperCase())}
-                  placeholder="ABCDE1234F"
-                  className="w-full font-mono uppercase rounded-lg border border-slate-300 px-2.5 py-1.5 bg-white text-xs"
-                />
-              </div>
-              <div>
-                <label className="text-[11px] font-medium text-slate-600">UPI ID</label>
-                <input
-                  type="text"
-                  value={invoice.creator?.upi_id || ""}
-                  onChange={(e) => handleCreatorFieldChange("upi_id", e.target.value)}
-                  placeholder="username@okaxis"
+                  value={invoice.creator?.bank_name || ""}
+                  onChange={(e) => handleCreatorFieldChange("bank_name", e.target.value)}
+                  placeholder="HDFC Bank"
                   className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 bg-white text-xs"
                 />
               </div>
+
+              <div>
+                <label className="text-[11px] font-medium text-slate-600">Account Holder Name</label>
+                <input
+                  type="text"
+                  value={invoice.creator?.account_holder || ""}
+                  onChange={(e) => handleCreatorFieldChange("account_holder", e.target.value)}
+                  placeholder="Full Name as in Bank"
+                  className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 bg-white text-xs"
+                />
+              </div>
+
               <div>
                 <label className="text-[11px] font-medium text-slate-600">Bank Account No</label>
                 <input
@@ -312,6 +406,7 @@ export function ManualInvoiceForm({ invoice, onChange }: ManualInvoiceFormProps)
                   className="w-full font-mono rounded-lg border border-slate-300 px-2.5 py-1.5 bg-white text-xs"
                 />
               </div>
+
               <div>
                 <label className="text-[11px] font-medium text-slate-600">IFSC Code</label>
                 <input
@@ -322,6 +417,29 @@ export function ManualInvoiceForm({ invoice, onChange }: ManualInvoiceFormProps)
                   className="w-full font-mono uppercase rounded-lg border border-slate-300 px-2.5 py-1.5 bg-white text-xs"
                 />
               </div>
+
+              <div>
+                <label className="text-[11px] font-medium text-slate-600">PAN Number</label>
+                <input
+                  type="text"
+                  value={invoice.creator?.pan || ""}
+                  onChange={(e) => handleCreatorFieldChange("pan", e.target.value.toUpperCase())}
+                  placeholder="ABCDE1234F"
+                  className="w-full font-mono uppercase rounded-lg border border-slate-300 px-2.5 py-1.5 bg-white text-xs"
+                />
+              </div>
+
+              <div>
+                <label className="text-[11px] font-medium text-slate-600">UPI ID</label>
+                <input
+                  type="text"
+                  value={invoice.creator?.upi_id || ""}
+                  onChange={(e) => handleCreatorFieldChange("upi_id", e.target.value)}
+                  placeholder="username@okhdfcbank"
+                  className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 bg-white text-xs"
+                />
+              </div>
+
               <div className="sm:col-span-2">
                 <label className="text-[11px] font-medium text-slate-600">Detailed Address</label>
                 <textarea

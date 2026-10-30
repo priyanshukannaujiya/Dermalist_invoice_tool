@@ -19,9 +19,13 @@ import {
   Save,
   Loader2,
   AlertTriangle,
+  UploadCloud,
+  FileSpreadsheet,
+  Download,
 } from "lucide-react";
 import { toast } from "sonner";
 import { PAN_REGEX, IFSC_REGEX, UDYAM_REGEX } from "@/lib/utils";
+import { CreatorImportModal } from "@/components/creators/CreatorImportModal";
 
 export default function CreatorsPage() {
   const [creators, setCreators] = useState<Creator[]>([]);
@@ -33,6 +37,7 @@ export default function CreatorsPage() {
 
   // Modal State
   const [modalOpen, setModalOpen] = useState(false);
+  const [importModalOpen, setImportModalOpen] = useState(false);
   const [editingCreator, setEditingCreator] = useState<Creator | null>(null);
   const [saving, setSaving] = useState(false);
   const [formData, setFormData] = useState<Partial<Creator>>({
@@ -208,13 +213,35 @@ export default function CreatorsPage() {
             </p>
           </div>
 
-          <button
-            onClick={handleOpenAdd}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-xs text-white bg-emerald-600 hover:bg-emerald-700 transition-all shadow-md shadow-emerald-600/20 cursor-pointer self-start sm:self-auto"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Add New Creator</span>
-          </button>
+          <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+            <button
+              onClick={() => setImportModalOpen(true)}
+              className="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-xl font-semibold text-xs text-emerald-950 bg-emerald-100 hover:bg-emerald-200 border border-emerald-300 transition-all shadow-xs cursor-pointer"
+            >
+              <UploadCloud className="w-4 h-4 text-emerald-700" />
+              <span>Import (CSV / Excel)</span>
+            </button>
+
+            <button
+              onClick={() => {
+                window.open("/api/creators/export?format=xlsx", "_blank");
+                toast.success("Downloading creators directory Excel...");
+              }}
+              className="inline-flex items-center gap-1.5 px-3 py-2.5 rounded-xl font-semibold text-xs text-slate-700 bg-white hover:bg-slate-100 border border-slate-200 transition-all shadow-xs cursor-pointer"
+              title="Export all creators to Excel"
+            >
+              <Download className="w-4 h-4 text-slate-500" />
+              <span>Export</span>
+            </button>
+
+            <button
+              onClick={handleOpenAdd}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-xs text-white bg-emerald-600 hover:bg-emerald-700 transition-all shadow-md shadow-emerald-600/20 cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Add New Creator</span>
+            </button>
+          </div>
         </div>
 
         {/* Filter & Search Bar */}
@@ -582,6 +609,13 @@ export default function CreatorsPage() {
           </div>
         </div>
       )}
+
+      {/* Bulk CSV & Excel Import Modal */}
+      <CreatorImportModal
+        isOpen={importModalOpen}
+        onClose={() => setImportModalOpen(false)}
+        onImportSuccess={() => loadCreators()}
+      />
     </div>
   );
 }

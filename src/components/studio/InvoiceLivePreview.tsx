@@ -9,9 +9,15 @@ interface InvoiceLivePreviewProps {
   invoice: InvoiceDraft;
   isLoading?: boolean;
   onEditCreator?: () => void;
+  onSyncCreator?: () => void;
 }
 
-export function InvoiceLivePreview({ invoice, isLoading, onEditCreator }: InvoiceLivePreviewProps) {
+export function InvoiceLivePreview({
+  invoice,
+  isLoading,
+  onEditCreator,
+  onSyncCreator,
+}: InvoiceLivePreviewProps) {
   const c = invoice.creator || { name: "" };
   const isMissingBankDetails = !c.pan?.trim() || !c.bank_account?.trim() || !c.ifsc?.trim();
 
@@ -237,8 +243,20 @@ export function InvoiceLivePreview({ invoice, isLoading, onEditCreator }: Invoic
 
         {/* Banking and Settlement Info */}
         <div className="border-t border-slate-200 pt-4 mt-4">
-          <div className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
-            Settlement & Banking Credentials
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+              Settlement & Banking Credentials
+            </div>
+            {onSyncCreator && c.name && (
+              <button
+                type="button"
+                onClick={onSyncCreator}
+                className="text-[11px] text-emerald-700 hover:text-emerald-800 font-semibold flex items-center gap-1 cursor-pointer transition-colors"
+                title="Re-query database for this creator's bank account"
+              >
+                <span>Re-fetch from Database</span>
+              </button>
+            )}
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-slate-700 bg-slate-50/60 p-3 rounded-xl border border-slate-200/60 font-mono">
             <div>
@@ -249,19 +267,24 @@ export function InvoiceLivePreview({ invoice, isLoading, onEditCreator }: Invoic
               {c.bank_account ? (
                 <span>•••• •••• {c.bank_account.slice(-4)} ({c.bank_account})</span>
               ) : (
-                "Not provided"
+                <span className="text-amber-600 italic">Not provided</span>
               )}
             </div>
             <div>
-              <strong className="font-sans text-slate-500">IFSC Code:</strong> {c.ifsc || "Not provided"}
+              <strong className="font-sans text-slate-500">IFSC Code:</strong>{" "}
+              {c.ifsc ? <span className="font-bold text-slate-800">{c.ifsc}</span> : <span className="text-amber-600 italic">Not provided</span>}
             </div>
             <div>
               <strong className="font-sans text-slate-500">Account Holder:</strong>{" "}
               {c.account_holder || c.name || "—"}
             </div>
-            {c.bank_name && (
+            {c.bank_name ? (
               <div className="sm:col-span-2">
                 <strong className="font-sans text-slate-500">Bank Name:</strong> {c.bank_name}
+              </div>
+            ) : (
+              <div className="sm:col-span-2 text-slate-400 italic">
+                <strong className="font-sans text-slate-500 not-italic">Bank Name:</strong> Not specified
               </div>
             )}
           </div>

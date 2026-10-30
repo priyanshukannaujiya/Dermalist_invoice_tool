@@ -2,7 +2,7 @@ import ExcelJS from "exceljs";
 import JSZip from "jszip";
 import path from "path";
 import fs from "fs";
-import { findCreatorByName, getCreatorById } from "./db";
+import { findCreatorByName, getCreatorById, getCreatorByNameOrId } from "./db";
 
 export interface InvoiceExcelPayload {
   invoice_number: string;
@@ -78,30 +78,31 @@ export async function generateInvoiceExcelBuffer(data: InvoiceExcelPayload): Pro
     process.env.TEMPLATE_PATH || "templates/non gst invoice format - Dermalist (2).xlsx"
   );
 
-  // If creator details are incomplete, query database to fill missing fields
+  // Fetch authoritative creator details and bank account from database
   let c = { ...data.creator };
-  if ((!c.bank_account || !c.pan || !c.ifsc || !c.bank_name) && (c.id || c.name)) {
+  if (c.id || c.name) {
     try {
-      const dbCreator = c.id ? await getCreatorById(c.id) : await findCreatorByName(c.name);
+      const dbCreator = await getCreatorByNameOrId(c.id, c.name);
       if (dbCreator) {
         c = {
           ...c,
+          id: dbCreator.id,
           name: c.name || dbCreator.name,
           address: c.address || dbCreator.address || "",
           email: c.email || dbCreator.email || "",
           phone: c.phone || dbCreator.phone || "",
-          pan: c.pan || dbCreator.pan || "",
-          upi_id: c.upi_id || dbCreator.upi_id || "",
-          bank_account: c.bank_account || dbCreator.bank_account || "",
-          ifsc: c.ifsc || dbCreator.ifsc || "",
-          account_holder: c.account_holder || dbCreator.account_holder || dbCreator.name,
-          bank_name: c.bank_name || dbCreator.bank_name || "",
-          is_msme: c.is_msme ?? dbCreator.is_msme,
-          msme_registration_no: c.msme_registration_no || dbCreator.msme_registration_no || "",
+          pan: dbCreator.pan || c.pan || "",
+          upi_id: dbCreator.upi_id || c.upi_id || "",
+          bank_account: dbCreator.bank_account || c.bank_account || "",
+          ifsc: dbCreator.ifsc || c.ifsc || "",
+          account_holder: dbCreator.account_holder || c.account_holder || dbCreator.name,
+          bank_name: dbCreator.bank_name || c.bank_name || "",
+          is_msme: dbCreator.is_msme ?? c.is_msme ?? false,
+          msme_registration_no: dbCreator.msme_registration_no || c.msme_registration_no || "",
         };
       }
-    } catch {
-      // Continue with available data
+    } catch (err) {
+      console.warn("Excel export: Creator database enrichment error:", err);
     }
   }
 

@@ -103,6 +103,8 @@ export async function initDatabase(): Promise<void> {
     await pool.query(`
       ALTER TABLE creators ADD COLUMN IF NOT EXISTS is_msme BOOLEAN DEFAULT FALSE;
       ALTER TABLE creators ADD COLUMN IF NOT EXISTS msme_registration_no TEXT;
+      ALTER TABLE creators ALTER COLUMN created_at SET DEFAULT NOW();
+      ALTER TABLE creators ALTER COLUMN updated_at SET DEFAULT NOW();
     `);
 
     // 2. Ensure invoices table exists
@@ -198,7 +200,7 @@ export async function getCreatorById(id: number): Promise<Creator | null> {
 }
 
 export async function findCreatorByName(name: string): Promise<Creator | null> {
-  const trimmed = name.trim();
+  const trimmed = name?.trim();
   if (!trimmed) return null;
 
   // 1. Try exact case-insensitive match
@@ -208,19 +210,32 @@ export async function findCreatorByName(name: string): Promise<Creator | null> {
   );
   if (exact.length > 0) return exact[0];
 
-  // 2. Try partial match (first name or substring)
+  // 2. Try match by PAN if input looks like a PAN
+  if (/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/i.test(trimmed)) {
+    const panMatch = await query<Creator>(
+      "SELECT * FROM creators WHERE UPPER(TRIM(pan)) = UPPER($1) LIMIT 1",
+      [trimmed]
+    );
+    if (panMatch.length > 0) return panMatch[0];
+  }
+
+  // 3. Try partial substring match (name contains query or query contains name)
   const partial = await query<Creator>(
-    "SELECT * FROM creators WHERE name ILIKE $1 ORDER BY LENGTH(name) ASC LIMIT 1",
-    [`%${trimmed}%`]
+    "SELECT * FROM creators WHERE name ILIKE $1 OR $2 ILIKE ('%' || name || '%') ORDER BY LENGTH(name) ASC LIMIT 1",
+    [`%${trimmed}%`, trimmed]
   );
   if (partial.length > 0) return partial[0];
 
-  // 3. Try matching first word (e.g. 'Aaditi' matches 'Aaditi Abhijeet Raut')
-  const firstWord = trimmed.split(/\s+/)[0];
-  if (firstWord.length >= 3) {
+  // 4. Try matching individual words (skip common prefixes like Mr, Miss, Influencer)
+  const words = trimmed
+    .split(/\s+/)
+    .map((w) => w.replace(/[^a-zA-Z0-9]/g, ""))
+    .filter((w) => w.length >= 3 && !["mr", "mrs", "miss", "the", "creator", "influencer"].includes(w.toLowerCase()));
+
+  for (const word of words) {
     const wordMatch = await query<Creator>(
       "SELECT * FROM creators WHERE name ILIKE $1 ORDER BY LENGTH(name) ASC LIMIT 1",
-      [`%${firstWord}%`]
+      [`%${word}%`]
     );
     if (wordMatch.length > 0) return wordMatch[0];
   }
@@ -228,12 +243,111 @@ export async function findCreatorByName(name: string): Promise<Creator | null> {
   return null;
 }
 
+export async function getCreatorByNameOrId(
+  id?: number | null,
+  name?: string | null
+): Promise<Creator | null> {
+  if (id && !isNaN(Number(id))) {
+    const byId = await getCreatorById(Number(id));
+    if (byId) return byId;
+  }
+  if (name && name.trim()) {
+    const byName = await findCreatorByName(name);
+    if (byName) return byName;
+  }
+  return null;
+}
+
+export async function upsertCreator(data: Partial<Creator>): Promise<{ creator: Creator; isNew: boolean }> {
+  await initDatabase();
+  const name = (data.name || "").trim();
+  if (!name) throw new Error("Creator name is required.");
+
+  const pan = data.pan ? data.pan.trim().toUpperCase() : null;
+
+  // Check if creator exists by PAN or by exact name
+  let existing: Creator | null = null;
+  if (pan) {
+    const panRows = await query<Creator>(
+      "SELECT * FROM creators WHERE UPPER(TRIM(pan)) = $1 LIMIT 1",
+      [pan]
+    );
+    if (panRows.length > 0) existing = panRows[0];
+  }
+
+  if (!existing) {
+    const nameRows = await query<Creator>(
+      "SELECT * FROM creators WHERE LOWER(TRIM(name)) = LOWER($1) LIMIT 1",
+      [name]
+    );
+    if (nameRows.length > 0) existing = nameRows[0];
+  }
+
+  if (existing) {
+    const updated = await updateCreator(existing.id, {
+      name: data.name || existing.name,
+      address: data.address !== undefined ? data.address : existing.address,
+      email: data.email !== undefined ? data.email : existing.email,
+      phone: data.phone !== undefined ? data.phone : existing.phone,
+      pan: pan || existing.pan,
+      upi_id: data.upi_id !== undefined ? data.upi_id : existing.upi_id,
+      bank_account: data.bank_account !== undefined && data.bank_account !== "" ? data.bank_account : existing.bank_account,
+      ifsc: data.ifsc ? data.ifsc.trim().toUpperCase() : existing.ifsc,
+      account_holder: data.account_holder || existing.account_holder || data.name || existing.name,
+      bank_name: data.bank_name !== undefined && data.bank_name !== "" ? data.bank_name : existing.bank_name,
+      is_msme: data.is_msme !== undefined ? Boolean(data.is_msme) : existing.is_msme,
+      msme_registration_no: data.msme_registration_no !== undefined ? data.msme_registration_no : existing.msme_registration_no,
+    });
+    return { creator: updated!, isNew: false };
+  } else {
+    const created = await createCreator(data);
+    return { creator: created, isNew: true };
+  }
+}
+
+export async function bulkUpsertCreators(creatorsList: Partial<Creator>[]): Promise<{
+  total: number;
+  inserted: number;
+  updated: number;
+  creators: Creator[];
+  errors: string[];
+}> {
+  let inserted = 0;
+  let updated = 0;
+  const errors: string[] = [];
+  const results: Creator[] = [];
+
+  for (let i = 0; i < creatorsList.length; i++) {
+    const c = creatorsList[i];
+    try {
+      if (!c.name?.trim()) {
+        errors.push(`Row ${i + 1}: Name is required`);
+        continue;
+      }
+      const { creator, isNew } = await upsertCreator(c);
+      if (isNew) inserted++;
+      else updated++;
+      results.push(creator);
+    } catch (err: any) {
+      errors.push(`Row ${i + 1} (${c.name || "Unknown"}): ${err.message || "Failed to save"}`);
+    }
+  }
+
+  return {
+    total: results.length,
+    inserted,
+    updated,
+    creators: results,
+    errors,
+  };
+}
+
 export async function createCreator(data: Partial<Creator>): Promise<Creator> {
   await initDatabase();
   const rows = await query<Creator>(
     `INSERT INTO creators (
-      name, address, email, phone, pan, upi_id, bank_account, ifsc, account_holder, bank_name, is_msme, msme_registration_no
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+      name, address, email, phone, pan, upi_id, bank_account, ifsc, account_holder, bank_name, is_msme, msme_registration_no, created_at, updated_at
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW())
     RETURNING *`,
     [
       data.name,

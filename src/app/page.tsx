@@ -7,14 +7,17 @@ import { ManualInvoiceForm } from "@/components/studio/ManualInvoiceForm";
 import { InvoiceLivePreview } from "@/components/studio/InvoiceLivePreview";
 import { ActionToolbar } from "@/components/studio/ActionToolbar";
 import { MissingCreatorModal } from "@/components/studio/MissingCreatorModal";
-import { Sparkles, Edit3, Eye, FileText, CheckCircle2 } from "lucide-react";
+import { CreatorImportModal } from "@/components/creators/CreatorImportModal";
+import { Sparkles, Edit3, Eye, FileText, CheckCircle2, UploadCloud } from "lucide-react";
 import { formatDateDDMMYYYY } from "@/lib/utils";
+import { toast } from "sonner";
 
 export default function StudioPage() {
   const [activeTab, setActiveTab] = useState<"ai" | "manual">("ai");
   const [isLoading, setIsLoading] = useState(false);
   const [botReply, setBotReply] = useState<string | null>(null);
   const [missingModalOpen, setMissingModalOpen] = useState(false);
+  const [importModalOpen, setImportModalOpen] = useState(false);
   const [pendingCreatorName, setPendingCreatorName] = useState("");
 
   const [invoice, setInvoice] = useState<InvoiceDraft>({
@@ -57,6 +60,58 @@ export default function StudioPage() {
       })
       .catch((err) => console.error("Error fetching next invoice number:", err));
   }, []);
+
+  const handleSelectCreator = (creator: CreatorProfile) => {
+    setInvoice((prev) => ({
+      ...prev,
+      creator: {
+        id: creator.id,
+        name: creator.name,
+        address: creator.address || "",
+        email: creator.email || "",
+        phone: creator.phone || "",
+        pan: creator.pan || "",
+        bank_name: creator.bank_name || "",
+        bank_account: creator.bank_account || "",
+        ifsc: creator.ifsc || "",
+        account_holder: creator.account_holder || creator.name,
+        upi_id: creator.upi_id || "",
+        is_msme: creator.is_msme || false,
+        msme_registration_no: creator.msme_registration_no || "",
+      },
+      creatorMatched: true,
+    }));
+  };
+
+  const handleSyncCreator = async () => {
+    const creatorName = invoice.creator?.name;
+    const creatorId = invoice.creator?.id;
+    if (!creatorName && !creatorId) {
+      toast.error("No creator specified to sync.");
+      return;
+    }
+
+    try {
+      const url = creatorId
+        ? `/api/creators/${creatorId}`
+        : `/api/creators?search=${encodeURIComponent(creatorName!)}&limit=1`;
+
+      const res = await fetch(url);
+      if (!res.ok) throw new Error("Failed to find creator in directory.");
+
+      const data = await res.json();
+      const found = creatorId ? data : data.creators?.[0];
+
+      if (found) {
+        handleSelectCreator(found);
+        toast.success(`Synced latest bank details for ${found.name}!`);
+      } else {
+        toast.error(`Creator "${creatorName}" not found in database.`);
+      }
+    } catch (err: any) {
+      toast.error(err.message || "Could not sync creator details.");
+    }
+  };
 
   const handleAIParsed = (data: any) => {
     setBotReply(data.botReply);
@@ -126,29 +181,39 @@ export default function StudioPage() {
             </p>
           </div>
 
-          <div className="flex items-center gap-2 bg-white border border-slate-200 p-1 rounded-xl shadow-xs self-start">
+          <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
             <button
-              onClick={() => setActiveTab("ai")}
-              className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-                activeTab === "ai"
-                  ? "bg-emerald-600 text-white shadow-xs"
-                  : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
-              }`}
+              onClick={() => setImportModalOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-emerald-950 bg-emerald-100 hover:bg-emerald-200 border border-emerald-300 transition-all shadow-xs cursor-pointer"
             >
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>AI Prompt Studio</span>
+              <UploadCloud className="w-3.5 h-3.5 text-emerald-700" />
+              <span>Import Creators (CSV/Excel)</span>
             </button>
-            <button
-              onClick={() => setActiveTab("manual")}
-              className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-                activeTab === "manual"
-                  ? "bg-slate-900 text-white shadow-xs"
-                  : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
-              }`}
-            >
-              <Edit3 className="w-3.5 h-3.5" />
-              <span>Manual Form</span>
-            </button>
+
+            <div className="flex items-center gap-1 bg-white border border-slate-200 p-1 rounded-xl shadow-xs">
+              <button
+                onClick={() => setActiveTab("ai")}
+                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                  activeTab === "ai"
+                    ? "bg-emerald-600 text-white shadow-xs"
+                    : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
+                }`}
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>AI Prompt Studio</span>
+              </button>
+              <button
+                onClick={() => setActiveTab("manual")}
+                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                  activeTab === "manual"
+                    ? "bg-slate-900 text-white shadow-xs"
+                    : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
+                }`}
+              >
+                <Edit3 className="w-3.5 h-3.5" />
+                <span>Manual Form</span>
+              </button>
+            </div>
           </div>
         </div>
 
@@ -163,9 +228,15 @@ export default function StudioPage() {
                 setIsLoading={setIsLoading}
                 botReply={botReply}
                 currentInvoice={invoice}
+                onSelectCreator={handleSelectCreator}
+                onOpenImportModal={() => setImportModalOpen(true)}
               />
             ) : (
-              <ManualInvoiceForm invoice={invoice} onChange={setInvoice} />
+              <ManualInvoiceForm
+                invoice={invoice}
+                onChange={setInvoice}
+                onOpenImportModal={() => setImportModalOpen(true)}
+              />
             )}
           </div>
 
@@ -193,6 +264,7 @@ export default function StudioPage() {
                 setPendingCreatorName(invoice.creator?.name || "Creator");
                 setMissingModalOpen(true);
               }}
+              onSyncCreator={handleSyncCreator}
             />
           </div>
         </div>
@@ -205,6 +277,15 @@ export default function StudioPage() {
         creatorName={pendingCreatorName || invoice.creator?.name || ""}
         initialCreator={invoice.creator}
         onSaveCreator={handleMissingCreatorSaved}
+      />
+
+      {/* Bulk CSV & Excel Import Modal */}
+      <CreatorImportModal
+        isOpen={importModalOpen}
+        onClose={() => setImportModalOpen(false)}
+        onImportSuccess={() => {
+          handleSyncCreator();
+        }}
       />
     </div>
   );
