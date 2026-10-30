@@ -610,6 +610,16 @@ elif page == "💬 Create Invoice":
                 if f"👤 {c['name']}" == selected_profile_label:
                     base_data = dict(c)
                     linked_creator_id = c["id"]
+                    # If this selected profile is the creator extracted from the prompt/draft,
+                    # overlay any non-empty details supplied directly in the prompt/draft.
+                    # This ensures freshly supplied bank/PAN/address details aren't lost to empty DB fields!
+                    if draft.get("creator_profile") and (
+                        not draft.get("creator_name")
+                        or draft["creator_name"].strip().lower() == c["name"].strip().lower()
+                    ):
+                        for k, v in draft["creator_profile"].items():
+                            if v and isinstance(v, str) and v.strip() and k != "id":
+                                base_data[k] = v.strip()
                     break
         else:
             # Enter Unique / New Creator: use details provided in the prompt

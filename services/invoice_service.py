@@ -98,14 +98,22 @@ class InvoiceService:
         # Ensure creator_id is linked or create/update creator profile
         creator_name = invoice_data["creator_name"].strip()
         creator_id = invoice_data.get("creator_id")
-        if not creator_id:
+        if creator_id:
+            # Update creator record with any newly provided non-empty details
+            existing = database.get_creator_by_id(creator_id, db_path=self.db_path)
+            if existing:
+                updated_profile = dict(existing)
+                updated_profile.update({k: v for k, v in creator_data.items() if v and str(v).strip()})
+                database.update_creator(creator_id, updated_profile, db_path=self.db_path)
+                creator_data = updated_profile
+        else:
             # Check for exact case-insensitive match only
             existing = database.find_creator_by_name(creator_name, db_path=self.db_path)
             if existing and existing["name"].strip().lower() == creator_name.lower():
                 creator_id = existing["id"]
                 # Update any newly provided details
                 updated_profile = dict(existing)
-                updated_profile.update({k: v for k, v in creator_data.items() if v})
+                updated_profile.update({k: v for k, v in creator_data.items() if v and str(v).strip()})
                 database.update_creator(creator_id, updated_profile, db_path=self.db_path)
                 creator_data = updated_profile
             else:
