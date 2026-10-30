@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   Sparkles,
   Send,
@@ -14,6 +14,8 @@ import {
   Building,
   CreditCard,
   Check,
+  Mic,
+  MicOff,
 } from "lucide-react";
 import { toast } from "sonner";
 import { InvoiceDraft, CreatorProfile } from "@/types/invoice";
@@ -29,9 +31,9 @@ interface AIPromptStudioProps {
 }
 
 const SAMPLE_PROMPTS = [
-  "Generate a non-GST invoice for Aaditi Raut for ₹2,500 for one promotional video on 29 Oct 2026, discount ₹200.",
-  "Create invoice for Rohan Sharma: 2 reels for ₹5,000 dated 28 Feb 2026, with link https://instagram.com/reel/abc123",
-  "Bill Priya Venkat ₹3,500 for Dermalist product review photoshoot, no discount, terms UPI",
+  "Generate a non-GST invoice for Aaditi Raut for ₹2,500, Bank Name: HDFC Bank, Account: 50100234567890, IFSC: HDFC0000123",
+  "Create invoice for Rohan Sharma: 2 reels for ₹5,000, Bank: State Bank of India, A/C: 987654321012, IFSC: SBIN0001234",
+  "Bill Priya Venkat ₹3,500 in ICICI Bank, Account: 112233445566, IFSC: ICIC0000001, PAN: ABCDE1234F",
 ];
 
 export function AIPromptStudio({
@@ -46,6 +48,64 @@ export function AIPromptStudio({
   const [prompt, setPrompt] = useState("");
   const [creatorsList, setCreatorsList] = useState<CreatorProfile[]>([]);
   const [showPicker, setShowPicker] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const recognitionRef = useRef<any>(null);
+
+  const toggleListening = () => {
+    if (isListening) {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
+      setIsListening(false);
+      return;
+    }
+
+    const SpeechRecognition =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      toast.error("Voice speech recognition is not supported in this browser. Please use Chrome or Edge.");
+      return;
+    }
+
+    try {
+      const recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = "en-IN";
+
+      recognition.onstart = () => {
+        setIsListening(true);
+        toast.info("Microphone active: Speak your creator name, bank name, account number, or invoice brief...");
+      };
+
+      recognition.onresult = (event: any) => {
+        let transcript = "";
+        for (let i = 0; i < event.results.length; i++) {
+          transcript += event.results[i][0].transcript + " ";
+        }
+        setPrompt(transcript.trim());
+      };
+
+      recognition.onerror = (event: any) => {
+        if (event.error !== "no-speech") {
+          toast.error(`Voice input notice: ${event.error}`);
+        }
+        setIsListening(false);
+      };
+
+      recognition.onend = () => {
+        setIsListening(false);
+      };
+
+      recognitionRef.current = recognition;
+      recognition.start();
+    } catch (err: any) {
+      console.error("Speech recognition error:", err);
+      toast.error("Microphone access could not be started.");
+      setIsListening(false);
+    }
+  };
 
   useEffect(() => {
     fetch("/api/creators?limit=50")
@@ -189,13 +249,46 @@ export function AIPromptStudio({
 
       {/* Prompt input card */}
       <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-4">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <label htmlFor="prompt-input" className="text-sm font-bold text-slate-800 flex items-center gap-2">
             <Sparkles className="w-4 h-4 text-emerald-600" />
-            <span>Conversational Prompt</span>
+            <span>Conversational & Voice Prompt</span>
           </label>
-          <span className="text-xs text-slate-500 font-medium">Groq Cloud LLM</span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={toggleListening}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                isListening
+                  ? "bg-red-500 hover:bg-red-600 text-white animate-pulse shadow-md shadow-red-200"
+                  : "bg-slate-100 hover:bg-emerald-50 text-slate-700 hover:text-emerald-800 border border-slate-200"
+              }`}
+              title={isListening ? "Listening... click to stop" : "Click to speak prompt using Voice"}
+            >
+              {isListening ? (
+                <>
+                  <MicOff className="w-3.5 h-3.5" />
+                  <span>Listening... Stop</span>
+                </>
+              ) : (
+                <>
+                  <Mic className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Voice Input</span>
+                </>
+              )}
+            </button>
+            <span className="text-xs text-slate-500 font-medium">Groq Cloud LLM</span>
+          </div>
         </div>
+
+        {isListening && (
+          <div className="bg-red-50 border border-red-200 rounded-xl p-2.5 flex items-center gap-2 text-xs text-red-700 animate-in fade-in">
+            <div className="w-2.5 h-2.5 bg-red-500 rounded-full animate-ping" />
+            <span>
+              <strong>Microphone Active:</strong> Speak creator name, bank name (e.g. HDFC, ICICI, SBI), account number, amount...
+            </span>
+          </div>
+        )}
 
         <div className="relative">
           <textarea
@@ -203,7 +296,7 @@ export function AIPromptStudio({
             rows={4}
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
-            placeholder="e.g. Generate a non-GST invoice for Aaditi Raut for ₹2,500 for one promotional video on 29 Oct 2026, discount ₹200."
+            placeholder="e.g. Name: Rohan Sharma, 2 reels for ₹5,000, Bank Name: HDFC Bank, Account: 50100234567890, IFSC: HDFC0000123"
             className="w-full text-sm rounded-xl border border-slate-300 p-3.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-all text-slate-900 placeholder:text-slate-400"
             disabled={isLoading}
             onKeyDown={(e) => {

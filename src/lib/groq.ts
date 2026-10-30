@@ -25,17 +25,121 @@ const FALLBACK_MODELS = [
   "openai/gpt-oss-20b",
 ];
 
+export const IFSC_BANK_MAP: Record<string, string> = {
+  HDFC: "HDFC Bank",
+  ICIC: "ICICI Bank",
+  SBIN: "State Bank of India",
+  UTIB: "Axis Bank",
+  KKBK: "Kotak Mahindra Bank",
+  PUNB: "Punjab National Bank",
+  BARB: "Bank of Baroda",
+  CNRB: "Canara Bank",
+  UBIN: "Union Bank of India",
+  INDB: "IndusInd Bank",
+  YESB: "Yes Bank",
+  IDFB: "IDFC First Bank",
+  FDRL: "Federal Bank",
+  BKID: "Bank of India",
+  IDIB: "Indian Bank",
+  IOBA: "Indian Overseas Bank",
+  MAHB: "Bank of Maharashtra",
+  PSIB: "Punjab & Sind Bank",
+  CBIN: "Central Bank of India",
+  UCBA: "UCO Bank",
+  CORP: "Corporation Bank",
+  ANDB: "Andhra Bank",
+  ALLA: "Allahabad Bank",
+  SYNB: "Syndicate Bank",
+  VIJB: "Vijaya Bank",
+  ORBC: "Oriental Bank of Commerce",
+  PAYT: "Paytm Payments Bank",
+  AIRP: "Airtel Payments Bank",
+  IPOS: "India Post Payments Bank",
+};
+
+export const KNOWN_BANKS = [
+  "State Bank of India",
+  "HDFC Bank",
+  "ICICI Bank",
+  "Axis Bank",
+  "Kotak Mahindra Bank",
+  "Kotak Bank",
+  "Punjab National Bank",
+  "Bank of Baroda",
+  "Canara Bank",
+  "Union Bank of India",
+  "Union Bank",
+  "IndusInd Bank",
+  "Yes Bank",
+  "IDFC First Bank",
+  "IDFC Bank",
+  "Federal Bank",
+  "Bank of India",
+  "Indian Bank",
+  "Indian Overseas Bank",
+  "Bank of Maharashtra",
+  "Central Bank of India",
+  "UCO Bank",
+  "Paytm Payments Bank",
+  "Airtel Payments Bank",
+];
+
+export function extractBankName(prompt: string, ifsc?: string | null): string | null {
+  if (!prompt) return null;
+
+  // 1. Explicit keyword match (supports commas, newlines, voice dictation: "bank name HDFC Bank", "bank is State Bank of India", "in ICICI Bank", "bank: Axis Bank")
+  const explicitMatch = prompt.match(
+    /(?:^|\n|[,;]|\b)(?:bank(?:\s*name)?(?:\s*is)?|in\s*bank)\s*[:=-]?\s*([A-Za-z\s&]{2,35}?)(?=[,;\n\r]|(?:\b(?:a\/?c|account|acc|no|ifsc|code|pan|upi|phone|mobile|contact|for|dated|amount|₹|rs|balance)\b)|$)/i
+  );
+  if (explicitMatch && explicitMatch[1]?.trim()) {
+    const candidate = explicitMatch[1].trim();
+    const cleaned = candidate.replace(/\s+(?:account|a\/c|branch|no)$/i, "").trim();
+    if (cleaned.length >= 2 && !/^(?:is|the|of|a|an|details?)$/i.test(cleaned)) {
+      return cleaned;
+    }
+  }
+
+  // 2. Check for known Indian bank names mentioned anywhere in prompt/voice
+  for (const b of KNOWN_BANKS) {
+    const escaped = b.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const regex = new RegExp(`\\b${escaped}\\b`, "i");
+    if (regex.test(prompt)) {
+      return b;
+    }
+  }
+
+  // Common bank abbreviations
+  if (/\bSBI\b/i.test(prompt)) return "State Bank of India";
+  if (/\bPNB\b/i.test(prompt)) return "Punjab National Bank";
+  if (/\bBOB\b/i.test(prompt)) return "Bank of Baroda";
+  if (/\bHDFC\b/i.test(prompt)) return "HDFC Bank";
+  if (/\bICICI\b/i.test(prompt)) return "ICICI Bank";
+  if (/\bKOTAK\b/i.test(prompt)) return "Kotak Mahindra Bank";
+  if (/\bAXIS\b/i.test(prompt)) return "Axis Bank";
+
+  // 3. Fallback: Auto-infer bank name from IFSC code prefix if IFSC is present
+  if (ifsc && typeof ifsc === "string" && ifsc.length >= 4) {
+    const prefix = ifsc.substring(0, 4).toUpperCase();
+    if (IFSC_BANK_MAP[prefix]) {
+      return IFSC_BANK_MAP[prefix];
+    }
+  }
+
+  return null;
+}
+
 const SYSTEM_PROMPT = `
 You are an expert AI Invoice Assistant specialized in extracting invoice details for Dermalist creator billings.
-Your role is to analyze conversational requests or structured creator briefs and extract the billing details into a clean JSON object.
+Your role is to analyze conversational requests or structured creator briefs (including speech/voice inputs) and extract the billing details into a clean JSON object.
 
 SECURITY / PRIVACY RULE:
-Do NOT extract or store sensitive bank account credentials if they appear; focus on creator name, billing address, services rendered, and commercial amounts.
+Do NOT extract or store sensitive bank account credentials if they appear; focus on creator name, billing address, bank name, services rendered, and commercial amounts.
 
 Required JSON Output Schema:
 {
   "creatorName": string or null (full name of creator/influencer, e.g. "Neha Patil", "Aaditi Raut", "Sneha Patil"),
   "creatorAddress": string or null (full billing address or residence if mentioned in the prompt, or null),
+  "bankName": string or null (name of creator's bank if stated or spoken, e.g. "HDFC Bank", "ICICI Bank", "State Bank of India", "Axis Bank", "Kotak Mahindra Bank", or null),
   "date": string or null (invoice date mentioned or null, e.g. "29-10-2026" or "29 Oct 2026"),
   "description": string (service description, e.g. "Promotional Video for Dermalist" or "Brand Collaboration Services"),
   "taxableValue": number (numeric value in INR before discount, e.g. 2500, default 0 if not mentioned),
@@ -49,26 +153,27 @@ Rules:
 1. Parse rupee symbols (₹, Rs, INR, k/K e.g. 2.5k -> 2500, ₹2,500 -> 2500) accurately into numeric values.
 2. If quantity is specified (e.g. "2 reels", "one video"), extract quantity as integer and adjust taxableValue if it is a total or per unit.
 3. If no price is mentioned, set taxableValue to 0.
-4. Respond ONLY with valid JSON.
+4. If bank name is mentioned in the voice or text (e.g. "bank is HDFC", "ICICI Bank", "SBI account"), extract bankName.
+5. Respond ONLY with valid JSON.
 `;
 
 // Helper: Extract credentials locally on the server without sending them to Groq
 function extractLocalCredentials(prompt: string) {
   const panMatch =
-    prompt.match(/(?:^|\n|\s)(?:pan(?:\s*number|\s*no\.?)?)\s*[:=-]?\s*([A-Z]{5}[0-9]{4}[A-Z]{1})\b/i) ||
+    prompt.match(/(?:^|\n|[,;]|\s)(?:pan(?:\s*number|\s*no\.?)?)\s*[:=-]?\s*([A-Z]{5}[0-9]{4}[A-Z]{1})\b/i) ||
     prompt.match(/\b([A-Z]{5}[0-9]{4}[A-Z]{1})\b/i);
 
   const ifscMatch =
-    prompt.match(/(?:^|\n|\s)(?:ifsc(?:\s*code)?)\s*[:=-]?\s*([A-Z]{4}0[A-Z0-9]{6})\b/i) ||
+    prompt.match(/(?:^|\n|[,;]|\s)(?:ifsc(?:\s*code)?)\s*[:=-]?\s*([A-Z]{4}0[A-Z0-9]{6})\b/i) ||
     prompt.match(/\b([A-Z]{4}0[A-Z0-9]{6})\b/i);
 
   const emailMatch =
-    prompt.match(/(?:^|\n)\s*(?:email(?:\s*id)?|e-mail)\s*[:=-]?\s*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/i) ||
+    prompt.match(/(?:^|\n|[,;]|\s)(?:email(?:\s*id)?|e-mail)\s*[:=-]?\s*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/i) ||
     prompt.match(/\b([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})\b/);
   const email = emailMatch ? emailMatch[1].trim() : null;
 
   const phoneLabeledMatch = prompt.match(
-    /(?:^|\n)\s*(?:contact(?:\s*number|\s*no\.?)?|phone(?:\s*number|\s*no\.?)?|mobile(?:\s*number|\s*no\.?)?|whatsapp)\s*[:=-]?\s*([+0-9\s-]{10,15})/i
+    /(?:^|\n|[,;]|\s)(?:contact(?:\s*number|\s*no\.?)?|phone(?:\s*number|\s*no\.?)?|mobile(?:\s*number|\s*no\.?)?|whatsapp)\s*[:=-]?\s*([+0-9\s-]{10,15})/i
   );
   const phoneGenericMatch = prompt.match(/(?:(?:\+91|0)[\s-]?)?([6-9]\d{9})\b/);
   const phone = phoneLabeledMatch
@@ -78,17 +183,16 @@ function extractLocalCredentials(prompt: string) {
     : null;
 
   const nameLineMatch = prompt.match(
-    /(?:^|\n)\s*(?:creator(?:\s*name)?|influencer|name|bill\s*to)\s*[:=-]\s*([^\n\r,]+)/i
+    /(?:^|\n|[,;]|\s)(?:creator(?:\s*name)?|influencer|name|bill\s*to)\s*[:=-]\s*([^\n\r,]+)/i
   );
   const name = nameLineMatch ? nameLineMatch[1].trim() : null;
 
   const addrLineMatch = prompt.match(
-    /(?:^|\n)\s*(?:address|location|residence)\s*[:=-]\s*([^\n\r]+)/i
+    /(?:^|\n|[,;]|\s)(?:address|location|residence)\s*[:=-]\s*([^\n\r,]+)/i
   );
   const address = addrLineMatch ? addrLineMatch[1].trim() : null;
 
-  const bankNameMatch = prompt.match(/(?:^|\n)\s*(?:bank(?:\s*name)?)\s*[:=-]\s*([^\n\r,]+)/i);
-  const bank_name = bankNameMatch ? bankNameMatch[1].trim() : null;
+  const bank_name = extractBankName(prompt, ifscMatch ? ifscMatch[1] : null);
 
   // Bank account: require explicit account keyword or 11+ digits to avoid confusing with 10-digit phone numbers
   const accMatch = prompt.match(
@@ -109,7 +213,7 @@ function extractLocalCredentials(prompt: string) {
 
   let upi_id: string | null = null;
   const upiExplicit = prompt.match(
-    /(?:^|\n|\s)(?:upi(?:\s*id)?|vpa)\s*[:=-]?\s*([a-zA-Z0-9.\-_]{2,}@[a-zA-Z0-9]{2,})\b/i
+    /(?:^|\n|[,;]|\s)(?:upi(?:\s*id)?|vpa)\s*[:=-]?\s*([a-zA-Z0-9.\-_]{2,}@[a-zA-Z0-9]{2,})\b/i
   );
   if (upiExplicit) {
     upi_id = upiExplicit[1].trim();
@@ -210,9 +314,14 @@ export async function parseInvoiceWithGroq(prompt: string): Promise<ParsedInvoic
     }
   }
 
-  // Determine final creator name and address (prefer explicit user-provided lines)
+  // Determine final creator name, address, and bank name (prefer explicit user-provided lines or LLM extraction)
   const finalCreatorName = localCreds.name || extracted.creatorName?.trim() || null;
   const finalAddress = localCreds.address || extracted.creatorAddress?.trim() || "";
+  const finalBankName =
+    localCreds.bank_name ||
+    extracted.bankName?.trim() ||
+    extractBankName(prompt, localCreds.ifsc) ||
+    "";
 
   const taxableValue = Math.max(0, parseFloat(extracted.taxableValue) || 0);
   const discount = Math.max(0, parseFloat(extracted.discount) || 0);
@@ -241,7 +350,7 @@ export async function parseInvoiceWithGroq(prompt: string): Promise<ParsedInvoic
         email: localCreds.email || matchedCreator.email || "",
         phone: localCreds.phone || matchedCreator.phone || "",
         pan: localCreds.pan || matchedCreator.pan || "",
-        bank_name: localCreds.bank_name || matchedCreator.bank_name || "",
+        bank_name: finalBankName || matchedCreator.bank_name || "",
         bank_account: localCreds.bank_account || matchedCreator.bank_account || "",
         ifsc: localCreds.ifsc || matchedCreator.ifsc || "",
         account_holder: matchedCreator.account_holder || matchedCreator.name,
@@ -255,7 +364,7 @@ export async function parseInvoiceWithGroq(prompt: string): Promise<ParsedInvoic
         email: localCreds.email || "",
         phone: localCreds.phone || "",
         pan: localCreds.pan || "",
-        bank_name: localCreds.bank_name || "",
+        bank_name: finalBankName || "",
         bank_account: localCreds.bank_account || "",
         ifsc: localCreds.ifsc || "",
         account_holder: finalCreatorName || "",
