@@ -1,0 +1,60 @@
+// Dermalist AI Invoice Studio - Prisma Schema
+// Target database: PostgreSQL (Neon Serverless)
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Creator {
+  id                   Int       @id @default(autoincrement())
+  name                 String
+  address              String?
+  email                String?
+  phone                String?
+  pan                  String?   @map("pan")
+  upi_id               String?
+  bank_account         String?   @map("bank_account")
+  ifsc                 String?   @map("ifsc")
+  account_holder       String?   @map("account_holder")
+  bank_name            String?
+  is_msme              Boolean   @default(false) @map("is_msme")
+  msme_registration_no String?   @map("msme_registration_no")
+  created_at           DateTime? @default(now()) @map("created_at")
+  updated_at           DateTime? @updatedAt @map("updated_at")
+
+  invoices Invoice[]
+
+  @@map("creators")
+}
+
+model Invoice {
+  id                     Int       @id @default(autoincrement())
+  invoice_number         String    @unique @map("invoice_number")
+  creator_id             Int?      @map("creator_id")
+  creator_name           String?   @map("creator_name")
+  invoice_date           String?   @map("invoice_date")
+  service_description    String?   @map("service_description")
+  quantity               Int?      @default(1)
+  unit_price             Decimal?  @default(0) @map("unit_price") @db.Decimal(10, 2)
+  taxable_value          Decimal   @default(0) @map("taxable_value") @db.Decimal(10, 2)
+  discount               Decimal   @default(0) @map("discount") @db.Decimal(10, 2)
+  subtotal_less_discount Decimal   @default(0) @map("subtotal_less_discount") @db.Decimal(10, 2)
+  balance_due            Decimal   @default(0) @map("balance_due") @db.Decimal(10, 2)
+  payment_terms          String?   @default("Bank Transfer Or UPICode") @map("payment_terms")
+  video_link             String?   @map("video_link")
+  status                 String?   @default("Generated")
+  excel_path             String?   @map("excel_path")
+  pdf_path               String?   @map("pdf_path")
+  raw_prompt             String?   @map("raw_prompt")
+  created_at             DateTime? @default(now()) @map("created_at")
+  updated_at             DateTime? @updatedAt @map("updated_at")
+
+  creator Creator? @relation(fields: [creator_id], references: [id], onDelete: SetNull)
+
+  @@map("invoices")
+}
