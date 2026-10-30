@@ -19,7 +19,9 @@ export function InvoiceLivePreview({
   onSyncCreator,
 }: InvoiceLivePreviewProps) {
   const c = invoice.creator || { name: "" };
-  const isMissingBankDetails = !c.pan?.trim() || !c.bank_account?.trim() || !c.ifsc?.trim();
+  const isMissingBankDetails =
+    Boolean(c.name?.trim()) &&
+    (!c.pan?.trim() || !c.bank_account?.trim() || !c.ifsc?.trim());
 
   return (
     <div className="relative bg-white border border-slate-200/80 rounded-2xl shadow-xl shadow-slate-200/50 p-6 sm:p-8 flex flex-col justify-between overflow-hidden">
@@ -72,15 +74,19 @@ export function InvoiceLivePreview({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            {!isMissingBankDetails && invoice.creatorMatched ? (
+            {!isMissingBankDetails && invoice.creatorMatched && c.name?.trim() ? (
               <span className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
                 <CheckCircle2 className="w-3.5 h-3.5" />
                 Verified Creator
               </span>
-            ) : (
+            ) : c.name?.trim() ? (
               <span className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
                 <AlertCircle className="w-3.5 h-3.5" />
                 Incomplete Details
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
+                Draft
               </span>
             )}
 
