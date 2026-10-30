@@ -611,12 +611,14 @@ elif page == "💬 Create Invoice":
                     base_data = dict(c)
                     linked_creator_id = c["id"]
                     break
-        elif matched_creator:
-            base_data = dict(matched_creator)
-            linked_creator_id = matched_creator["id"]
-        elif draft.get("creator_profile"):
-            base_data = dict(draft["creator_profile"])
-            linked_creator_id = base_data.get("id")
+        else:
+            # Enter Unique / New Creator: use details provided in the prompt
+            if draft.get("creator_profile"):
+                base_data = dict(draft["creator_profile"])
+                linked_creator_id = base_data.get("id")
+            elif matched_creator:
+                base_data = dict(matched_creator)
+                linked_creator_id = matched_creator["id"]
 
         active_creator_name = base_data.get("name") or draft.get("creator_name") or ""
 

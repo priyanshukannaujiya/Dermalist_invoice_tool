@@ -46,12 +46,21 @@ class InvoiceService:
         # Next sequential invoice number
         next_inv_no = database.get_next_invoice_number(db_path=self.db_path)
 
+        # If creator exists in DB, use their profile as base
+        profile_dict = dict(creator) if creator else {}
+        # Overlay any specific details provided directly in the user prompt
+        prompt_fields = ["address", "email", "phone", "pan", "upi_id", "bank_account", "ifsc", "account_holder", "bank_name"]
+        for f in prompt_fields:
+            val = extracted.get(f)
+            if val and isinstance(val, str) and val.strip():
+                profile_dict[f] = val.strip()
+
         draft = {
             "invoice_number": next_inv_no,
             "creator_id": creator["id"] if creator else None,
             "creator_name": creator["name"] if creator else creator_name,
             "creator_matched": creator is not None,
-            "creator_profile": creator or {},
+            "creator_profile": profile_dict,
             "invoice_date": normalized_date,
             "service_description": extracted.get("service_description", "Promotional Video"),
             "quantity": totals["quantity"],

@@ -33,6 +33,15 @@ Required Output Format:
 Return ONLY a valid JSON object with the following keys:
 {
   "creator_name": string or null (full name of creator/freelancer),
+  "address": string or null (full address if provided),
+  "email": string or null (email address if provided),
+  "phone": string or null (contact phone number if provided),
+  "pan": string or null (PAN number if provided),
+  "upi_id": string or null (UPI ID if provided),
+  "bank_account": string or null (bank account number if provided),
+  "ifsc": string or null (IFSC code if provided),
+  "account_holder": string or null (name of accountholder if provided),
+  "bank_name": string or null (bank name if provided),
   "invoice_date": string or null (e.g. "29 October 2026", "29-10-2026", or null if not stated),
   "service_description": string or null (description of service, e.g. "1 x Promotional Video for Dermalist"),
   "quantity": integer (default 1),
@@ -46,6 +55,7 @@ Return ONLY a valid JSON object with the following keys:
 
 Rules:
 1. Do NOT invent prices or creator names if they are not mentioned in the prompt.
+2. If creator banking/contact details (address, PAN, bank account, IFSC, UPI) are provided in the prompt, extract them accurately into their respective keys.
 2. If rupee symbol ₹, 'Rs', 'INR', or 'k' is used (e.g. 2.5k -> 2500, ₹2,500 -> 2500), parse the numeric value.
 3. If quantity is specified (e.g. 'one video', '2 reels'), parse quantity as integer.
 4. Output raw JSON only, no markdown wrapping, or inside ```json ``` codeblock.
@@ -203,6 +213,15 @@ class GroqService:
 
         return {
             "creator_name": creator_name,
+            "address": raw.get("address"),
+            "email": raw.get("email"),
+            "phone": raw.get("phone"),
+            "pan": raw.get("pan"),
+            "upi_id": raw.get("upi_id"),
+            "bank_account": raw.get("bank_account"),
+            "ifsc": raw.get("ifsc"),
+            "account_holder": raw.get("account_holder"),
+            "bank_name": raw.get("bank_name"),
             "invoice_date": invoice_date,
             "service_description": service_desc,
             "quantity": qty,
@@ -230,23 +249,28 @@ def is_account_query(prompt: str) -> Tuple[bool, Optional[str]]:
     """
     lower = prompt.lower().strip()
 
-    # Exclude if prompt is an explicit invoice generation command with an amount
-    if (
-        ("generate" in lower or "create" in lower or "make" in lower)
-        and ("invoice" in lower or "bill" in lower)
-        and any(c.isdigit() for c in lower)
-    ):
+    # Exclude if prompt contains amounts, deliverables, campaign info, or invoice commands
+    # (e.g. pasted creator data with 'payment amount: ₹3,000' or 'video description' must generate invoice)
+    has_amount = any(sym in lower for sym in ["₹", "rs", "inr", "payment amount", "amount:", "price:", "deliverable", "campaign"]) and any(c.isdigit() for c in lower)
+    has_invoice_keyword = any(w in lower for w in ["invoice", "bill", "generate", "create", "make"])
+    if has_amount:
+        return False, None
+    if has_invoice_keyword and any(c.isdigit() for c in lower):
         return False, None
 
+    # Only treat as account query if prompt specifically requests fetching/viewing
+    query_action_words = ["fetch", "show", "get", "view", "what is", "who is", "check", "find"]
+    has_action_request = any(act in lower for act in query_action_words)
+
     account_indicators = [
+        "details of user", "details of", "user details", "creator details",
         "account detail", "account details", "bank detail", "bank details",
-        "fetch details of user", "fetch details of", "user details", "creator details",
-        "show account", "get account", "banking detail", "banking info", "pan detail",
-        "ifsc", "bank account", "account no", "account number", "who is",
+        "banking detail", "banking info", "pan detail", "ifsc", "bank account",
+        "account no", "account number", "account",
     ]
 
     matched_indicator = any(ind in lower for ind in account_indicators)
-    if not matched_indicator:
+    if not (matched_indicator and has_action_request):
         return False, None
 
     # Try extracting target name or search term
