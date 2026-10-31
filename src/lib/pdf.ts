@@ -1,6 +1,6 @@
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
-import { formatCurrencyINR } from "./utils";
+import { formatCurrencyINR, resolveBankName } from "./utils";
 import { InvoiceExcelPayload } from "./excel";
 import { getCreatorByNameOrId } from "./db";
 
@@ -32,6 +32,8 @@ export async function generateInvoicePdfBuffer(data: InvoiceExcelPayload): Promi
       console.warn("PDF export: Creator database enrichment error:", err);
     }
   }
+
+  c.bank_name = resolveBankName(c.bank_name, c.ifsc);
 
   const doc = new jsPDF({
     orientation: "portrait",

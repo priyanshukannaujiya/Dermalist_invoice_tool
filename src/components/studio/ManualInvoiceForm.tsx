@@ -14,7 +14,7 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { toast } from "sonner";
-import { IFSC_BANK_MAP } from "@/lib/utils";
+import { IFSC_BANK_MAP, isValidBankName, resolveBankName } from "@/lib/utils";
 
 interface ManualInvoiceFormProps {
   invoice: InvoiceDraft;
@@ -68,7 +68,7 @@ export function ManualInvoiceForm({
         email: creator.email || "",
         phone: creator.phone || "",
         pan: creator.pan || "",
-        bank_name: creator.bank_name || "",
+        bank_name: resolveBankName(creator.bank_name, creator.ifsc),
         bank_account: creator.bank_account || "",
         ifsc: creator.ifsc || "",
         account_holder: creator.account_holder || creator.name,
@@ -417,7 +417,7 @@ export function ManualInvoiceForm({
                     const val = e.target.value.toUpperCase();
                     const prefix = val.substring(0, 4);
                     const inferred = IFSC_BANK_MAP[prefix];
-                    if (!invoice.creator?.bank_name && inferred) {
+                    if ((!invoice.creator?.bank_name || !isValidBankName(invoice.creator?.bank_name)) && inferred) {
                       onChange({
                         ...invoice,
                         creator: {

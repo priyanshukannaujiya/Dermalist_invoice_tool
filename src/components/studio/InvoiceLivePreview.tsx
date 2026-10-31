@@ -2,7 +2,7 @@
 
 import React from "react";
 import { InvoiceDraft } from "@/types/invoice";
-import { formatCurrencyINR } from "@/lib/utils";
+import { formatCurrencyINR, resolveBankName } from "@/lib/utils";
 import { Building2, CheckCircle2, AlertCircle, ShieldCheck, ExternalLink } from "lucide-react";
 
 interface InvoiceLivePreviewProps {
@@ -284,9 +284,9 @@ export function InvoiceLivePreview({
               <strong className="font-sans text-slate-500">Account Holder:</strong>{" "}
               {c.account_holder || c.name || "—"}
             </div>
-            {c.bank_name ? (
+            {resolveBankName(c.bank_name, c.ifsc) ? (
               <div className="sm:col-span-2">
-                <strong className="font-sans text-slate-500">Bank Name:</strong> {c.bank_name}
+                <strong className="font-sans text-slate-500">Bank Name:</strong> {resolveBankName(c.bank_name, c.ifsc)}
               </div>
             ) : (
               <div className="sm:col-span-2 text-slate-400 italic">

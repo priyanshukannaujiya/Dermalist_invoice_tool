@@ -100,3 +100,66 @@ export const IFSC_BANK_MAP: Record<string, string> = {
   AIRP: "Airtel Payments Bank",
   IPOS: "India Post Payments Bank",
 };
+
+export function isValidBankName(name?: string | null): boolean {
+  if (!name || typeof name !== "string") return false;
+  const trimmed = name.trim();
+  if (trimmed.length < 2) return false;
+  if (/^[&+\/\\:=-]/.test(trimmed)) return false;
+  if (
+    /^(?:&?\s*(?:payment|transfer|credentials?|details?|info|information|settlement|terms|method|mode|online|banking|account|a\/c|code|number|na|n\/a|none|null|nil|not\s*provided|not\s*available|unknown|to\s*be\s*provided))\s*$/i.test(
+      trimmed
+    )
+  ) {
+    return false;
+  }
+  if (/^(?:and|&)\s+payment/i.test(trimmed)) return false;
+  return true;
+}
+
+export function canonicalizeBankName(name?: string | null): string {
+  if (!name || typeof name !== "string") return "";
+  let b = name.trim();
+  if (/^SBI$/i.test(b)) return "State Bank of India";
+  if (/^HDFC$/i.test(b)) return "HDFC Bank";
+  if (/^ICICI$/i.test(b)) return "ICICI Bank";
+  if (/^KOTAK$/i.test(b)) return "Kotak Mahindra Bank";
+  if (/^AXIS$/i.test(b)) return "Axis Bank";
+  if (/^PNB$/i.test(b)) return "Punjab National Bank";
+  if (/^BOB$/i.test(b)) return "Bank of Baroda";
+  if (/^IDBI$/i.test(b)) return "IDBI Bank";
+  return b;
+}
+
+export function getBankNameFromIFSC(ifsc?: string | null): string | null {
+  if (!ifsc || typeof ifsc !== "string") return null;
+  const clean = ifsc.trim().toUpperCase();
+  if (clean.length < 4) return null;
+  const prefix = clean.substring(0, 4);
+  return IFSC_BANK_MAP[prefix] || null;
+}
+
+export function resolveBankName(
+  explicitBank?: string | null,
+  ifsc?: string | null,
+  fallback?: string | null
+): string {
+  const ifscInferred = getBankNameFromIFSC(ifsc);
+  if (ifscInferred) {
+    if (!explicitBank || !isValidBankName(explicitBank)) {
+      return ifscInferred;
+    }
+    const canonical = canonicalizeBankName(explicitBank);
+    return canonical || ifscInferred;
+  }
+
+  if (explicitBank && isValidBankName(explicitBank)) {
+    return canonicalizeBankName(explicitBank);
+  }
+
+  if (fallback && isValidBankName(fallback)) {
+    return canonicalizeBankName(fallback);
+  }
+
+  return "";
+}

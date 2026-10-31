@@ -9,7 +9,7 @@ import { ActionToolbar } from "@/components/studio/ActionToolbar";
 import { MissingCreatorModal } from "@/components/studio/MissingCreatorModal";
 import { CreatorImportModal } from "@/components/creators/CreatorImportModal";
 import { Sparkles, Edit3, Eye, FileText, CheckCircle2, UploadCloud } from "lucide-react";
-import { formatDateDDMMYYYY } from "@/lib/utils";
+import { formatDateDDMMYYYY, resolveBankName } from "@/lib/utils";
 import { toast } from "sonner";
 
 export default function StudioPage() {
@@ -72,7 +72,7 @@ export default function StudioPage() {
         email: creator.email || "",
         phone: creator.phone || "",
         pan: creator.pan || "",
-        bank_name: creator.bank_name || "",
+        bank_name: resolveBankName(creator.bank_name, creator.ifsc),
         bank_account: creator.bank_account || "",
         ifsc: creator.ifsc || "",
         account_holder: creator.account_holder || creator.name,
@@ -117,20 +117,25 @@ export default function StudioPage() {
   const handleAIParsed = (data: any) => {
     setBotReply(data.botReply);
 
-    const updatedCreator: CreatorProfile = data.creator || {
-      name: data.creatorName || "",
-      address: "",
-      email: "",
-      phone: "",
-      pan: "",
-      bank_name: "",
-      bank_account: "",
-      ifsc: "",
-      account_holder: data.creatorName || "",
-      upi_id: "",
-      is_msme: false,
-      msme_registration_no: "",
-    };
+    const updatedCreator: CreatorProfile = data.creator
+      ? {
+          ...data.creator,
+          bank_name: resolveBankName(data.creator.bank_name, data.creator.ifsc),
+        }
+      : {
+          name: data.creatorName || "",
+          address: "",
+          email: "",
+          phone: "",
+          pan: "",
+          bank_name: "",
+          bank_account: "",
+          ifsc: "",
+          account_holder: data.creatorName || "",
+          upi_id: "",
+          is_msme: false,
+          msme_registration_no: "",
+        };
 
     setInvoice((prev) => ({
       ...prev,

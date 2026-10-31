@@ -4,7 +4,7 @@ import React, { useState } from "react";
 import { CreatorProfile } from "@/types/invoice";
 import { UserPlus, X, Save, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
-import { PAN_REGEX, IFSC_REGEX, IFSC_BANK_MAP } from "@/lib/utils";
+import { PAN_REGEX, IFSC_REGEX, IFSC_BANK_MAP, isValidBankName, resolveBankName } from "@/lib/utils";
 
 interface MissingCreatorModalProps {
   isOpen: boolean;
@@ -44,7 +44,7 @@ export function MissingCreatorModal({
         email: initialCreator?.email || "",
         phone: initialCreator?.phone || "",
         pan: initialCreator?.pan || "",
-        bank_name: initialCreator?.bank_name || "",
+        bank_name: resolveBankName(initialCreator?.bank_name, initialCreator?.ifsc),
         bank_account: initialCreator?.bank_account || "",
         ifsc: initialCreator?.ifsc || "",
         account_holder: initialCreator?.account_holder || creatorName || initialCreator?.name || "",
@@ -80,11 +80,17 @@ export function MissingCreatorModal({
       setSavingToDb(true);
       let creatorId: number | null = null;
 
+      const resolvedBank = resolveBankName(formData.bank_name, formData.ifsc);
+      const submissionData = {
+        ...formData,
+        bank_name: resolvedBank,
+      };
+
       if (saveToDirectory) {
         const res = await fetch("/api/creators", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(formData),
+          body: JSON.stringify(submissionData),
         });
 
         if (!res.ok) {
@@ -98,7 +104,7 @@ export function MissingCreatorModal({
       }
 
       onSaveCreator({
-        ...formData,
+        ...submissionData,
         id: creatorId,
         name: formData.name!,
       } as CreatorProfile);
@@ -192,7 +198,10 @@ export function MissingCreatorModal({
                 setFormData((prev) => ({
                   ...prev,
                   ifsc: val,
-                  bank_name: !prev.bank_name && inferredBank ? inferredBank : prev.bank_name,
+                  bank_name:
+                    !prev.bank_name || !isValidBankName(prev.bank_name)
+                      ? (inferredBank || "")
+                      : prev.bank_name,
                 }));
               }}
               className="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg font-mono uppercase"

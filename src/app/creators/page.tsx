@@ -24,7 +24,7 @@ import {
   Download,
 } from "lucide-react";
 import { toast } from "sonner";
-import { PAN_REGEX, IFSC_REGEX, UDYAM_REGEX } from "@/lib/utils";
+import { PAN_REGEX, IFSC_REGEX, UDYAM_REGEX, IFSC_BANK_MAP, isValidBankName, resolveBankName } from "@/lib/utils";
 import { CreatorImportModal } from "@/components/creators/CreatorImportModal";
 
 export default function CreatorsPage() {
@@ -114,7 +114,7 @@ export default function CreatorsPage() {
       email: creator.email || "",
       phone: creator.phone || "",
       pan: creator.pan || "",
-      bank_name: creator.bank_name || "",
+      bank_name: resolveBankName(creator.bank_name, creator.ifsc),
       bank_account: creator.bank_account || "",
       ifsc: creator.ifsc || "",
       account_holder: creator.account_holder || creator.name,
@@ -170,10 +170,13 @@ export default function CreatorsPage() {
       const url = editingCreator ? `/api/creators/${editingCreator.id}` : "/api/creators";
       const method = editingCreator ? "PUT" : "POST";
 
+      const resolvedBank = resolveBankName(formData.bank_name, formData.ifsc);
+      const submission = { ...formData, bank_name: resolvedBank };
+
       const res = await fetch(url, {
         method,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formData),
+        body: JSON.stringify(submission),
       });
 
       if (!res.ok) {
@@ -490,7 +493,19 @@ export default function CreatorsPage() {
                   <input
                     type="text"
                     value={formData.ifsc || ""}
-                    onChange={(e) => setFormData({ ...formData, ifsc: e.target.value.toUpperCase() })}
+                    onChange={(e) => {
+                      const val = e.target.value.toUpperCase();
+                      const prefix = val.substring(0, 4);
+                      const inferred = IFSC_BANK_MAP[prefix];
+                      setFormData((prev) => ({
+                        ...prev,
+                        ifsc: val,
+                        bank_name:
+                          !prev.bank_name || !isValidBankName(prev.bank_name)
+                            ? (inferred || "")
+                            : prev.bank_name,
+                      }));
+                    }}
                     className="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg font-mono uppercase"
                     placeholder="HDFC0000123"
                   />

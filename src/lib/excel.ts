@@ -3,6 +3,7 @@ import JSZip from "jszip";
 import path from "path";
 import fs from "fs";
 import { findCreatorByName, getCreatorById, getCreatorByNameOrId } from "./db";
+import { resolveBankName } from "./utils";
 
 export interface InvoiceExcelPayload {
   invoice_number: string;
@@ -106,6 +107,8 @@ export async function generateInvoiceExcelBuffer(data: InvoiceExcelPayload): Pro
     }
   }
 
+  c.bank_name = resolveBankName(c.bank_name, c.ifsc);
+
   const hasTemplate = fs.existsSync(templatePath);
 
   if (hasTemplate) {
@@ -175,9 +178,15 @@ export async function generateInvoiceExcelBuffer(data: InvoiceExcelPayload): Pro
     // 5. Creator Banking Details
     ws.getCell("B32").value = c.upi_id ? `UPI ID : ${c.upi_id}` : "UPI ID :";
     ws.getCell("B33").value = c.bank_account ? `Bank Account No:- ${c.bank_account}` : "Bank Account No:-";
-    ws.getCell("B34").value = `IFSC:- ${c.ifsc || ""}                               Name of Accountholder:- ${
-      c.account_holder || c.name
-    }                                    Name of Bank:- ${c.bank_name || ""}`;
+
+    const ifscText = `IFSC:- ${c.ifsc || ""}`;
+    const holderText = `Name of Accountholder:- ${c.account_holder || c.name || ""}`;
+    const bankText = `Name of Bank:- ${c.bank_name || ""}`;
+    const totalChars = ifscText.length + holderText.length + bankText.length;
+    const padding = Math.max(2, Math.floor((92 - totalChars) / 2));
+    const padStr = " ".repeat(padding);
+
+    ws.getCell("B34").value = `${ifscText}${padStr}${holderText}${padStr}${bankText}`;
 
     const rawBuffer = await workbook.xlsx.writeBuffer();
     return await sanitizeExcelBuffer(Buffer.from(rawBuffer));
@@ -295,9 +304,15 @@ export async function generateInvoiceExcelBuffer(data: InvoiceExcelPayload): Pro
     // Banking details
     ws.getCell("B32").value = `UPI ID : ${c.upi_id || ""}`;
     ws.getCell("B33").value = `Bank Account No:- ${c.bank_account || ""}`;
-    ws.getCell("B34").value = `IFSC:- ${c.ifsc || ""}                               Name of Accountholder:- ${
-      c.account_holder || c.name
-    }                                    Name of Bank:- ${c.bank_name || ""}`;
+
+    const ifscFallback = `IFSC:- ${c.ifsc || ""}`;
+    const holderFallback = `Name of Accountholder:- ${c.account_holder || c.name || ""}`;
+    const bankFallback = `Name of Bank:- ${c.bank_name || ""}`;
+    const totalFallbackChars = ifscFallback.length + holderFallback.length + bankFallback.length;
+    const padFallback = Math.max(2, Math.floor((92 - totalFallbackChars) / 2));
+    const padFallbackStr = " ".repeat(padFallback);
+
+    ws.getCell("B34").value = `${ifscFallback}${padFallbackStr}${holderFallback}${padFallbackStr}${bankFallback}`;
 
     const rawBuffer = await workbook.xlsx.writeBuffer();
     return await sanitizeExcelBuffer(Buffer.from(rawBuffer));

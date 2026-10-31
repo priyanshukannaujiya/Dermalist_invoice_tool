@@ -1,6 +1,6 @@
 import Papa from "papaparse";
 import * as XLSX from "xlsx";
-import { PAN_REGEX, IFSC_REGEX, UDYAM_REGEX } from "./utils";
+import { PAN_REGEX, IFSC_REGEX, UDYAM_REGEX, resolveBankName } from "./utils";
 import { Creator } from "./db";
 
 export interface ParsedCreatorRow {
@@ -245,9 +245,9 @@ export function normalizeRawRow(raw: Record<string, any>, rowIndex: number): Par
   const email = String(mapped.email || "").trim();
   const phone = String(mapped.phone || "").trim();
   const pan = cleanPanString(mapped.pan);
-  const bank_name = String(mapped.bank_name || "").trim();
   const bank_account = cleanBankAccountString(mapped.bank_account);
   const ifsc = cleanIfscString(mapped.ifsc);
+  const bank_name = resolveBankName(mapped.bank_name, ifsc);
   const account_holder = String(mapped.account_holder || "").trim() || name;
   const upi_id = String(mapped.upi_id || "").trim();
   const is_msme = cleanMsmeBoolean(mapped.is_msme);

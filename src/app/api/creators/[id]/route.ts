@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCreatorById, updateCreator, deleteCreator } from "@/lib/db";
-import { PAN_REGEX, IFSC_REGEX, UDYAM_REGEX } from "@/lib/utils";
+import { PAN_REGEX, IFSC_REGEX, UDYAM_REGEX, resolveBankName } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -60,6 +60,9 @@ export async function PUT(
       );
     }
 
+    if (body.bank_name !== undefined || body.ifsc !== undefined) {
+      body.bank_name = resolveBankName(body.bank_name, body.ifsc);
+    }
     const updated = await updateCreator(creatorId, body);
     if (!updated) {
       return NextResponse.json({ error: "Creator not found" }, { status: 404 });

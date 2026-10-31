@@ -1,6 +1,13 @@
 import Groq from "groq-sdk";
 import { findCreatorByName, Creator } from "./db";
-import { formatDateDDMMYYYY, IFSC_BANK_MAP } from "./utils";
+import {
+  formatDateDDMMYYYY,
+  IFSC_BANK_MAP,
+  isValidBankName,
+  canonicalizeBankName,
+  getBankNameFromIFSC,
+  resolveBankName,
+} from "./utils";
 export { IFSC_BANK_MAP };
 
 export interface ParsedInvoiceData {
@@ -76,37 +83,29 @@ export const KNOWN_BANKS = [
 export function extractBankName(prompt: string, ifsc?: string | null): string | null {
   if (!prompt && !ifsc) return null;
 
+  // 1. Authoritative check: if IFSC prefix matches known Indian bank, return it directly
+  const fromIfsc = getBankNameFromIFSC(ifsc);
+  if (fromIfsc) {
+    return fromIfsc;
+  }
+
   if (prompt) {
-    // 1. Explicit keyword match
-    // Handles:
-    // "Bank Details: HDFC Bank", "Bank Name: State Bank of India", "Name of Bank: ICICI Bank",
-    // "Bank: Axis Bank", "Bank is Kotak Mahindra Bank", "In bank Canara Bank", "Bank - IDBI Bank"
-    const explicitMatch =
-      prompt.match(
-        /(?:^|\n|[,;]|\b)(?:(?:name\s*of\s*bank|bank(?:\s*name)?|bank\s*details?)(?:\s*is)?|in\s*bank)\s*[:=-]?\s*([A-Za-z0-9\s&.]{2,40}?)(?=[,;\n\r]|(?:\b(?:a\/?c|account|acc|no|ifsc|code|pan|upi|phone|mobile|contact|for|dated|amount|₹|rs|balance)\b)|$)/i
-      ) ||
-      prompt.match(
-        /(?:^|\n)\s*(?:(?:name\s*of\s*bank|bank(?:\s*name)?|bank\s*details?)(?:\s*is)?)\s*[:=-]?\s*([^\n\r]+)/i
-      );
+    // 2. Explicit keyword match with strict colon/separator requirement
+    // Only matches "Bank Name: HDFC", "Name of Bank: ICICI", "Bank: Axis", "Bank is SBI"
+    const explicitMatch = prompt.match(
+      /(?:^|\n|[,;])\s*(?:(?:name\s*of\s*bank|bank\s*name)\s*[:=-]|bank\s*[:=-]|bank\s+is\s+)\s*([A-Za-z0-9\s&.]{2,40}?)(?=[,;\n\r]|(?:\b(?:a\/?c|account|acc|no|ifsc|code|pan|upi|phone|mobile|contact|for|dated|amount|₹|rs|balance)\b)|$)/i
+    );
 
     if (explicitMatch && explicitMatch[1]?.trim()) {
       let candidate = explicitMatch[1].trim();
       candidate = candidate.replace(/\s+(?:account|a\/c|branch|no|details)$/i, "").trim();
       candidate = candidate.replace(/^[-:= ]+/, "").trim();
-      if (candidate.length >= 2 && !/^(?:is|the|of|a|an|details?)$/i.test(candidate)) {
-        if (/^SBI$/i.test(candidate)) return "State Bank of India";
-        if (/^HDFC$/i.test(candidate)) return "HDFC Bank";
-        if (/^ICICI$/i.test(candidate)) return "ICICI Bank";
-        if (/^KOTAK$/i.test(candidate)) return "Kotak Mahindra Bank";
-        if (/^AXIS$/i.test(candidate)) return "Axis Bank";
-        if (/^PNB$/i.test(candidate)) return "Punjab National Bank";
-        if (/^BOB$/i.test(candidate)) return "Bank of Baroda";
-        if (/^IDBI$/i.test(candidate)) return "IDBI Bank";
-        return candidate;
+      if (isValidBankName(candidate)) {
+        return canonicalizeBankName(candidate);
       }
     }
 
-    // 2. Check for known Indian bank names mentioned anywhere in prompt/voice
+    // 3. Known banks mentioned explicitly anywhere in prompt/voice
     for (const b of KNOWN_BANKS) {
       const escaped = b.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       const regex = new RegExp(`\\b${escaped}\\b`, "i");
@@ -124,14 +123,6 @@ export function extractBankName(prompt: string, ifsc?: string | null): string | 
     if (/\bKOTAK\b/i.test(prompt)) return "Kotak Mahindra Bank";
     if (/\bAXIS\b/i.test(prompt)) return "Axis Bank";
     if (/\bIDBI\b/i.test(prompt)) return "IDBI Bank";
-  }
-
-  // 3. Fallback: Auto-infer bank name from IFSC code prefix if IFSC is present
-  if (ifsc && typeof ifsc === "string" && ifsc.length >= 4) {
-    const prefix = ifsc.substring(0, 4).toUpperCase();
-    if (IFSC_BANK_MAP[prefix]) {
-      return IFSC_BANK_MAP[prefix];
-    }
   }
 
   return null;
@@ -348,17 +339,19 @@ export async function parseInvoiceWithGroq(prompt: string): Promise<ParsedInvoic
   // Bank Name: Combine regex extraction, LLM extraction, and IFSC code inference
   const regexBank = (localCreds.bank_name || "").trim();
   const llmBank = (extracted.bankName || "").trim();
-  const ifscInferredBank = extractBankName("", localCreds.ifsc) || "";
+  const ifscCode = localCreds.ifsc || (extracted as any).ifsc || null;
 
-  let finalBankName = regexBank || llmBank || ifscInferredBank || "";
-  if (/^SBI$/i.test(finalBankName)) finalBankName = "State Bank of India";
-  if (/^HDFC$/i.test(finalBankName)) finalBankName = "HDFC Bank";
-  if (/^ICICI$/i.test(finalBankName)) finalBankName = "ICICI Bank";
-  if (/^KOTAK$/i.test(finalBankName)) finalBankName = "Kotak Mahindra Bank";
-  if (/^AXIS$/i.test(finalBankName)) finalBankName = "Axis Bank";
-  if (/^PNB$/i.test(finalBankName)) finalBankName = "Punjab National Bank";
-  if (/^BOB$/i.test(finalBankName)) finalBankName = "Bank of Baroda";
-  if (/^IDBI$/i.test(finalBankName)) finalBankName = "IDBI Bank";
+  const candidateBank = isValidBankName(regexBank)
+    ? regexBank
+    : isValidBankName(llmBank)
+    ? llmBank
+    : null;
+
+  const finalBankName = resolveBankName(
+    candidateBank,
+    ifscCode,
+    extractBankName(prompt, ifscCode)
+  );
 
   const taxableValue = Math.max(0, parseFloat(extracted.taxableValue) || 0);
   const discount = Math.max(0, parseFloat(extracted.discount) || 0);
@@ -387,7 +380,7 @@ export async function parseInvoiceWithGroq(prompt: string): Promise<ParsedInvoic
         email: localCreds.email || matchedCreator.email || "",
         phone: localCreds.phone || matchedCreator.phone || "",
         pan: localCreds.pan || matchedCreator.pan || "",
-        bank_name: finalBankName || matchedCreator.bank_name || "",
+        bank_name: finalBankName || resolveBankName(matchedCreator.bank_name, matchedCreator.ifsc, "") || "",
         bank_account: localCreds.bank_account || matchedCreator.bank_account || "",
         ifsc: localCreds.ifsc || matchedCreator.ifsc || "",
         account_holder: matchedCreator.account_holder || matchedCreator.name,

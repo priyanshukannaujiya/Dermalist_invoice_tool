@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCreators, createCreator } from "@/lib/db";
-import { PAN_REGEX, IFSC_REGEX, UDYAM_REGEX } from "@/lib/utils";
+import { PAN_REGEX, IFSC_REGEX, UDYAM_REGEX, resolveBankName } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -56,6 +56,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    body.bank_name = resolveBankName(body.bank_name, body.ifsc);
     const creator = await createCreator(body);
     return NextResponse.json(creator, { status: 201 });
   } catch (error: any) {
