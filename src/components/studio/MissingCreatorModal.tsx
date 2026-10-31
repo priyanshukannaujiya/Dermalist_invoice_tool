@@ -118,26 +118,25 @@ export function MissingCreatorModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-4 animate-in fade-in zoom-in-95 duration-150">
+    <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4">
+      <div className="bg-white rounded-xl max-w-lg w-full p-6 shadow-xl border border-slate-200/90 space-y-4 animate-in fade-in zoom-in-95 duration-150">
         <div className="flex justify-between items-center border-b border-slate-100 pb-3">
-          <div className="flex items-center gap-2 text-slate-900 font-display font-bold text-base">
-            <UserPlus className="w-5 h-5 text-emerald-600" />
-            <span>New Creator Details Required</span>
+          <div className="flex items-center gap-2 text-slate-950 font-semibold text-sm">
+            <UserPlus className="w-4 h-4 text-slate-700" />
+            <span>Complete Creator Settlement Profile</span>
           </div>
           <button
             onClick={onClose}
-            className="text-slate-400 hover:text-slate-600 rounded-lg p-1 transition-colors"
+            className="text-slate-400 hover:text-slate-600 rounded-md p-1 transition-colors cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800 flex items-start gap-2">
-          <AlertCircle className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
-          <div>
-            AI parsed <strong>&ldquo;{creatorName}&rdquo;</strong>, but no matching profile exists in
-            the directory. Please input their banking and tax details to populate the invoice.
+        <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs text-slate-700 flex items-start gap-2.5">
+          <AlertCircle className="w-4 h-4 text-slate-500 mt-0.5 shrink-0" />
+          <div className="leading-relaxed">
+            Parsed creator <strong className="text-slate-900">&ldquo;{creatorName}&rdquo;</strong> is not yet registered in your directory. Enter their bank and tax credentials below to settle this invoice.
           </div>
         </div>
 
@@ -247,16 +246,16 @@ export function MissingCreatorModal({
             type="button"
             onClick={() => handleSubmit(false)}
             disabled={savingToDb}
-            className="px-3.5 py-2 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer"
+            className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg transition-colors cursor-pointer"
           >
-            Apply to this invoice only
+            Apply to invoice only
           </button>
 
           <button
             type="button"
             onClick={() => handleSubmit(true)}
             disabled={savingToDb}
-            className="px-4 py-2 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+            className="px-3.5 py-1.5 text-xs font-medium text-white bg-slate-900 hover:bg-slate-800 rounded-lg shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
           >
             <Save className="w-3.5 h-3.5" />
             <span>Save to Directory & Apply</span>

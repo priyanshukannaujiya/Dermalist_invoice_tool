@@ -3,7 +3,7 @@
 import React from "react";
 import { InvoiceDraft } from "@/types/invoice";
 import { formatCurrencyINR, resolveBankName } from "@/lib/utils";
-import { Building2, CheckCircle2, AlertCircle, ShieldCheck, ExternalLink } from "lucide-react";
+import { Building2, CheckCircle2, AlertCircle, ShieldCheck, ExternalLink, RefreshCw } from "lucide-react";
 
 interface InvoiceLivePreviewProps {
   invoice: InvoiceDraft;
@@ -24,16 +24,13 @@ export function InvoiceLivePreview({
     (!c.pan?.trim() || !c.bank_account?.trim() || !c.ifsc?.trim());
 
   return (
-    <div className="relative bg-white border border-slate-200/80 rounded-2xl shadow-xl shadow-slate-200/50 p-6 sm:p-8 flex flex-col justify-between overflow-hidden">
-      {/* Decorative top sheet bar */}
-      <div className="absolute top-0 left-0 right-0 h-2 bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-600" />
-
+    <div className="relative bg-white border border-slate-200/90 rounded-xl shadow-sm p-6 sm:p-8 flex flex-col justify-between overflow-hidden">
       {/* Loading Overlay */}
       {isLoading && (
-        <div className="absolute inset-0 bg-white/75 backdrop-blur-xs z-30 flex flex-col items-center justify-center gap-3">
-          <div className="w-10 h-10 border-3 border-emerald-600 border-t-transparent rounded-full animate-spin" />
-          <p className="text-sm font-semibold text-slate-800 animate-pulse">
-            Analyzing with Groq AI & Merging Database Credentials...
+        <div className="absolute inset-0 bg-white/80 backdrop-blur-xs z-30 flex flex-col items-center justify-center gap-2.5">
+          <div className="w-8 h-8 border-2 border-slate-900 border-t-transparent rounded-full animate-spin" />
+          <p className="text-xs font-medium text-slate-700">
+            Parsing invoice and merging database credentials...
           </p>
         </div>
       )}
@@ -42,19 +39,18 @@ export function InvoiceLivePreview({
       <div className="space-y-6">
         {/* Missing Credentials Alert Banner */}
         {isMissingBankDetails && (
-          <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-amber-900 animate-in fade-in">
+          <div className="bg-amber-50/90 border border-amber-200 rounded-lg p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-amber-900">
             <div className="flex items-center gap-2">
               <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
               <span>
-                <strong>Missing Bank Credentials:</strong> PAN, Account Number, or IFSC are incomplete.
-                The Excel file will have blank values in settlement rows.
+                <strong>Incomplete Bank Credentials:</strong> PAN, Account Number, or IFSC are missing.
               </span>
             </div>
             {onEditCreator && (
               <button
                 type="button"
                 onClick={onEditCreator}
-                className="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white font-semibold rounded-lg text-[11px] self-start sm:self-auto cursor-pointer transition-colors shrink-0 shadow-xs"
+                className="px-2.5 py-1 bg-amber-700 hover:bg-amber-800 text-white font-medium rounded-md text-[11px] self-start sm:self-auto cursor-pointer transition-colors shrink-0 shadow-xs"
               >
                 Enter Bank Details
               </button>
@@ -63,37 +59,31 @@ export function InvoiceLivePreview({
         )}
 
         {/* Title Bar & Status Badges */}
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-slate-100 pb-5">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-slate-100 pb-4">
           <div>
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
-              Non-GST Master Layout
-            </span>
-            <h1 className="text-3xl font-display font-extrabold tracking-tight text-slate-900">
+            <div className="text-[10px] font-mono uppercase tracking-wider text-slate-400">
+              Non-GST Invoice
+            </div>
+            <h1 className="text-2xl font-bold tracking-tight text-slate-950 font-sans">
               INVOICE
             </h1>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
             {!isMissingBankDetails && invoice.creatorMatched && c.name?.trim() ? (
-              <span className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
-                <CheckCircle2 className="w-3.5 h-3.5" />
+              <span className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-600"></span>
                 Verified Creator
               </span>
             ) : c.name?.trim() ? (
-              <span className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
-                <AlertCircle className="w-3.5 h-3.5" />
+              <span className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-md bg-amber-50 text-amber-800 border border-amber-200">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
                 Incomplete Details
               </span>
             ) : (
-              <span className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
+              <span className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-md bg-slate-100 text-slate-600 border border-slate-200">
+                <span className="w-1.5 h-1.5 rounded-full bg-slate-400"></span>
                 Draft
-              </span>
-            )}
-
-            {c.is_msme && (
-              <span className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
-                <ShieldCheck className="w-3.5 h-3.5" />
-                MSME Registered
               </span>
             )}
           </div>
@@ -102,66 +92,65 @@ export function InvoiceLivePreview({
         {/* Creator Info (Left) & Metadata (Right) */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {/* Creator details */}
-          <div className="space-y-1 text-sm">
-            <h2 className="font-bold text-base text-slate-900 tracking-tight">
+          <div className="space-y-1 text-xs">
+            <div className="text-[10px] font-mono uppercase tracking-wider text-slate-400 mb-0.5">
+              Creator (Payee)
+            </div>
+            <h2 className="font-semibold text-sm text-slate-900 tracking-tight">
               {c.name || <span className="text-slate-400 italic">Creator Name</span>}
             </h2>
             <p className="text-slate-600 text-xs leading-relaxed max-w-sm whitespace-pre-line">
               {c.address || <span className="text-slate-400 italic">Address in details state pin code</span>}
             </p>
-            <div className="pt-2 space-y-0.5 text-xs text-slate-600">
+            <div className="pt-2 space-y-0.5 text-slate-600 text-xs">
               <p>
-                <strong className="text-slate-700">Email ID:</strong> {c.email || "—"}
+                <strong className="text-slate-700 font-medium">Email ID:</strong> {c.email || "—"}
               </p>
               <p>
-                <strong className="text-slate-700">Contact Number:</strong> {c.phone || "—"}
+                <strong className="text-slate-700 font-medium">Contact Number:</strong> {c.phone || "—"}
               </p>
               <p>
-                <strong className="text-slate-700">PAN Number:</strong>{" "}
-                <span className="font-mono font-medium">{c.pan || "—"}</span>
+                <strong className="text-slate-700 font-medium">PAN Number:</strong>{" "}
+                <span className="font-mono">{c.pan || "—"}</span>
               </p>
             </div>
           </div>
 
           {/* Invoice Metadata Box */}
-          <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-4 text-xs space-y-2">
+          <div className="bg-slate-50 border border-slate-200/80 rounded-lg p-3.5 text-xs space-y-2">
             <div className="flex justify-between items-center border-b border-slate-200/60 pb-1.5">
-              <span className="font-semibold text-slate-600">Invoice No:</span>
-              <span className="font-mono font-bold text-emerald-700 text-sm">
+              <span className="font-medium text-slate-600">Invoice No:</span>
+              <span className="font-mono font-bold text-slate-950 text-xs">
                 {invoice.invoice_number || "DL-001"}
               </span>
             </div>
             <div className="flex justify-between items-center">
               <span className="text-slate-600">Invoice Date:</span>
-              <span className="font-medium text-slate-900">{invoice.invoice_date}</span>
+              <span className="font-medium text-slate-900 font-mono">{invoice.invoice_date}</span>
             </div>
             <div className="flex justify-between items-center">
               <span className="text-slate-600">Terms of Payment:</span>
               <span className="font-medium text-slate-900">{invoice.payment_terms || "Bank Transfer Or UPICode"}</span>
             </div>
             <div className="flex justify-between items-center">
-              <span className="text-slate-600">MSME Status:</span>
-              <span className={`font-semibold ${c.is_msme ? "text-blue-700" : "text-slate-700"}`}>
-                {c.is_msme ? "YES" : "NO"}
-              </span>
+              <span className="text-slate-600">MSME Regsistration Status :</span>
+              <span className="font-medium text-slate-900 font-mono">YES / NO</span>
             </div>
-            {c.is_msme && c.msme_registration_no && (
-              <div className="flex justify-between items-center pt-1 border-t border-slate-200/60">
-                <span className="text-slate-600">UDYAM Reg No:</span>
-                <span className="font-mono text-slate-800">{c.msme_registration_no}</span>
-              </div>
-            )}
+            <div className="flex justify-between items-center">
+              <span className="text-slate-600">If Yes : MSME No :</span>
+              <span className="font-mono text-slate-900 text-[11px]">UDYAM-MH-18-0490710</span>
+            </div>
           </div>
         </div>
 
         {/* Bill-To Section (B M M RETAIL PRIVATE LIMITED) */}
-        <div className="bg-slate-50/70 border border-slate-200 rounded-xl p-4 text-xs space-y-1">
-          <div className="flex items-center gap-1.5 text-slate-400 font-bold uppercase tracking-wider text-[10px]">
-            <Building2 className="w-3.5 h-3.5" />
+        <div className="bg-slate-50/70 border border-slate-200 rounded-lg p-3.5 text-xs space-y-1">
+          <div className="flex items-center gap-1.5 text-slate-400 font-semibold uppercase tracking-wider text-[10px]">
+            <Building2 className="w-3 h-3" />
             <span>BILL TO</span>
           </div>
-          <div className="font-bold text-slate-900 text-sm">B M M RETAIL PRIVATE LIMITED</div>
-          <p className="text-slate-600 leading-normal">
+          <div className="font-semibold text-slate-900 text-xs">B M M RETAIL PRIVATE LIMITED</div>
+          <p className="text-slate-600 leading-normal text-xs">
             THIRD, 307 A, FAIZ E QUTBI BUILDING, PLOT NO 375, Narsi Natha Street, Masjid Bander Maharashtra, 400009
           </p>
           <div className="flex flex-wrap gap-x-4 pt-1 text-slate-500 text-[11px]">
@@ -175,29 +164,29 @@ export function InvoiceLivePreview({
         </div>
 
         {/* Line Items Table */}
-        <div className="border border-slate-200 rounded-xl overflow-hidden">
+        <div className="border border-slate-200 rounded-lg overflow-hidden">
           <table className="w-full text-left border-collapse text-xs">
             <thead>
-              <tr className="bg-slate-100 text-slate-700 font-semibold uppercase tracking-wider text-[11px] border-b border-slate-200">
-                <th className="py-3 px-4">DESCRIPTION</th>
-                <th className="py-3 px-4 text-right w-40">Taxable Value</th>
+              <tr className="bg-slate-100/80 text-slate-700 font-semibold uppercase tracking-wider text-[10px] border-b border-slate-200">
+                <th className="py-2.5 px-4 font-medium">DESCRIPTION</th>
+                <th className="py-2.5 px-4 text-right w-40 font-medium">Taxable Value</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               <tr className="bg-white">
-                <td className="py-3.5 px-4">
-                  <div className="font-medium text-slate-900 text-sm">
+                <td className="py-3 px-4">
+                  <div className="font-medium text-slate-900 text-xs">
                     {invoice.quantity > 1 ? `${invoice.quantity} x ` : ""}
                     {invoice.service_description || "Promotional Video for Dermalist"}
                   </div>
                   {invoice.video_link && (
-                    <div className="mt-1 flex items-center gap-1 text-xs text-emerald-600 font-medium">
+                    <div className="mt-1 flex items-center gap-1 text-[11px] text-blue-600 font-medium">
                       <span>Video Link:</span>
                       <a
                         href={invoice.video_link}
                         target="_blank"
                         rel="noreferrer"
-                        className="underline hover:text-emerald-700 inline-flex items-center gap-0.5"
+                        className="underline hover:text-blue-800 inline-flex items-center gap-0.5"
                       >
                         {invoice.video_link}
                         <ExternalLink className="w-3 h-3" />
@@ -205,7 +194,7 @@ export function InvoiceLivePreview({
                     </div>
                   )}
                 </td>
-                <td className="py-3.5 px-4 text-right font-semibold text-slate-900 text-sm">
+                <td className="py-3 px-4 text-right font-medium text-slate-900 font-mono text-xs">
                   {formatCurrencyINR(invoice.taxable_value)}
                 </td>
               </tr>
@@ -214,83 +203,84 @@ export function InvoiceLivePreview({
         </div>
 
         {/* Totals & Breakdown */}
-        <div className="flex flex-col sm:flex-row justify-between items-start gap-4 pt-2">
+        <div className="flex flex-col sm:flex-row justify-between items-start gap-4 pt-1">
           {/* Note & Signature */}
-          <div className="text-xs text-slate-500 space-y-4 max-w-xs">
-            <p className="italic">Thank you for your business!</p>
-            <div className="pt-4">
-              <div className="border-b border-slate-300 w-36 mb-1" />
-              <span className="font-medium text-slate-700">Signature</span>
+          <div className="text-xs text-slate-400 space-y-3 max-w-xs">
+            <p className="italic text-[11px]">Thank you for your business!</p>
+            <div className="pt-2">
+              <div className="border-b border-slate-300 w-32 mb-1" />
+              <span className="text-[11px] text-slate-500 font-medium">Authorized Signature</span>
             </div>
           </div>
 
           {/* Calculations Box */}
-          <div className="w-full sm:w-72 bg-slate-50 rounded-xl p-3.5 space-y-2 text-xs border border-slate-200/80">
+          <div className="w-full sm:w-72 bg-slate-50 rounded-lg p-3 space-y-1.5 text-xs border border-slate-200/80 font-sans">
             <div className="flex justify-between items-center text-slate-600">
               <span>SUBTOTAL:</span>
-              <span className="font-medium">{formatCurrencyINR(invoice.taxable_value)}</span>
+              <span className="font-mono font-medium">{formatCurrencyINR(invoice.taxable_value)}</span>
             </div>
             <div className="flex justify-between items-center text-slate-600">
               <span>DISCOUNT:</span>
-              <span className="font-medium text-red-600">
+              <span className="font-mono font-medium text-red-600">
                 - {formatCurrencyINR(invoice.discount)}
               </span>
             </div>
-            <div className="flex justify-between items-center text-slate-700 font-semibold border-t border-slate-200 pt-1.5">
+            <div className="flex justify-between items-center text-slate-700 font-medium border-t border-slate-200 pt-1.5">
               <span>SUBTOTAL LESS DISCOUNT:</span>
-              <span>{formatCurrencyINR(invoice.subtotal_less_discount)}</span>
+              <span className="font-mono">{formatCurrencyINR(invoice.subtotal_less_discount)}</span>
             </div>
-            <div className="flex justify-between items-center text-emerald-700 font-bold text-sm bg-emerald-50 px-2.5 py-1.5 rounded-lg border border-emerald-200">
+            <div className="flex justify-between items-center text-slate-950 font-bold text-xs bg-white px-2.5 py-1.5 rounded border border-slate-200 shadow-2xs">
               <span>BALANCE DUE:</span>
-              <span>{formatCurrencyINR(invoice.balance_due)}</span>
+              <span className="font-mono text-sm text-emerald-700">{formatCurrencyINR(invoice.balance_due)}</span>
             </div>
           </div>
         </div>
 
         {/* Banking and Settlement Info */}
-        <div className="border-t border-slate-200 pt-4 mt-4">
+        <div className="border-t border-slate-200 pt-3">
           <div className="flex items-center justify-between mb-2">
-            <div className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+            <div className="text-[10px] font-mono font-semibold text-slate-400 uppercase tracking-wider">
               Settlement & Banking Credentials
             </div>
             {onSyncCreator && c.name && (
               <button
                 type="button"
                 onClick={onSyncCreator}
-                className="text-[11px] text-emerald-700 hover:text-emerald-800 font-semibold flex items-center gap-1 cursor-pointer transition-colors"
+                className="text-[11px] text-slate-600 hover:text-slate-900 font-medium flex items-center gap-1 cursor-pointer transition-colors"
                 title="Re-query database for this creator's bank account"
               >
-                <span>Re-fetch from Database</span>
+                <RefreshCw className="w-3 h-3" />
+                <span>Re-sync Database</span>
               </button>
             )}
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-slate-700 bg-slate-50/60 p-3 rounded-xl border border-slate-200/60 font-mono">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-slate-700 bg-slate-50 p-3 rounded-lg border border-slate-200/70 font-mono">
             <div>
-              <strong className="font-sans text-slate-500">UPI ID:</strong> {c.upi_id || "Not provided"}
+              <span className="font-sans text-slate-500 font-medium">UPI ID:</span> {c.upi_id || "Not provided"}
             </div>
             <div>
-              <strong className="font-sans text-slate-500">Bank Account:</strong>{" "}
+              <span className="font-sans text-slate-500 font-medium">Bank Account:</span>{" "}
               {c.bank_account ? (
-                <span>•••• •••• {c.bank_account.slice(-4)} ({c.bank_account})</span>
+                <span>•••• {c.bank_account.slice(-4)} ({c.bank_account})</span>
               ) : (
                 <span className="text-amber-600 italic">Not provided</span>
               )}
             </div>
             <div>
-              <strong className="font-sans text-slate-500">IFSC Code:</strong>{" "}
-              {c.ifsc ? <span className="font-bold text-slate-800">{c.ifsc}</span> : <span className="text-amber-600 italic">Not provided</span>}
+              <span className="font-sans text-slate-500 font-medium">IFSC Code:</span>{" "}
+              {c.ifsc ? <span className="font-bold text-slate-900">{c.ifsc}</span> : <span className="text-amber-600 italic">Not provided</span>}
             </div>
             <div>
-              <strong className="font-sans text-slate-500">Account Holder:</strong>{" "}
+              <span className="font-sans text-slate-500 font-medium">Account Holder:</span>{" "}
               {c.account_holder || c.name || "—"}
             </div>
             {resolveBankName(c.bank_name, c.ifsc) ? (
               <div className="sm:col-span-2">
-                <strong className="font-sans text-slate-500">Bank Name:</strong> {resolveBankName(c.bank_name, c.ifsc)}
+                <span className="font-sans text-slate-500 font-medium">Bank Name:</span> {resolveBankName(c.bank_name, c.ifsc)}
               </div>
             ) : (
               <div className="sm:col-span-2 text-slate-400 italic">
-                <strong className="font-sans text-slate-500 not-italic">Bank Name:</strong> Not specified
+                <span className="font-sans text-slate-500 font-medium not-italic">Bank Name:</span> Not specified
               </div>
             )}
           </div>

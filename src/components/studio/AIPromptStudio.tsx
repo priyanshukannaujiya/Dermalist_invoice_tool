@@ -2,7 +2,6 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import {
-  Sparkles,
   Send,
   ShieldCheck,
   CheckCircle2,
@@ -11,11 +10,13 @@ import {
   UploadCloud,
   Users,
   ChevronDown,
-  Building,
-  CreditCard,
   Check,
   Mic,
   MicOff,
+  Command,
+  CornerDownLeft,
+  Sparkles,
+  Search,
 } from "lucide-react";
 import { toast } from "sonner";
 import { InvoiceDraft, CreatorProfile } from "@/types/invoice";
@@ -31,9 +32,9 @@ interface AIPromptStudioProps {
 }
 
 const SAMPLE_PROMPTS = [
-  "Generate a non-GST invoice for Aaditi Raut for ₹2,500, Bank Name: HDFC Bank, Account: 50100234567890, IFSC: HDFC0000123",
-  "Create invoice for Rohan Sharma: 2 reels for ₹5,000, Bank: State Bank of India, A/C: 987654321012, IFSC: SBIN0001234",
-  "Bill Priya Venkat ₹3,500 in ICICI Bank, Account: 112233445566, IFSC: ICIC0000001, PAN: ABCDE1234F",
+  "Aaditi Raut: 1 promo reel for ₹2,500, Bank: HDFC Bank, Account: 50100234567890, IFSC: HDFC0000123",
+  "Rohan Sharma: 2 reels for ₹5,000, Bank: State Bank of India, A/C: 987654321012, IFSC: SBIN0001234",
+  "Priya Venkat: 1 deliverable ₹3,500, Bank: ICICI Bank, Account: 112233445566, IFSC: ICIC0000001",
 ];
 
 export function AIPromptStudio({
@@ -47,6 +48,7 @@ export function AIPromptStudio({
 }: AIPromptStudioProps) {
   const [prompt, setPrompt] = useState("");
   const [creatorsList, setCreatorsList] = useState<CreatorProfile[]>([]);
+  const [creatorSearch, setCreatorSearch] = useState("");
   const [showPicker, setShowPicker] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const recognitionRef = useRef<any>(null);
@@ -64,7 +66,7 @@ export function AIPromptStudio({
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
     if (!SpeechRecognition) {
-      toast.error("Voice speech recognition is not supported in this browser. Please use Chrome or Edge.");
+      toast.error("Voice dictation is not supported in this browser. Please use Chrome or Edge.");
       return;
     }
 
@@ -76,7 +78,7 @@ export function AIPromptStudio({
 
       recognition.onstart = () => {
         setIsListening(true);
-        toast.info("Microphone active: Speak your creator name, bank name, account number, or invoice brief...");
+        toast.info("Microphone active: Dictate creator, bank details, or deliverables...");
       };
 
       recognition.onresult = (event: any) => {
@@ -102,13 +104,13 @@ export function AIPromptStudio({
       recognition.start();
     } catch (err: any) {
       console.error("Speech recognition error:", err);
-      toast.error("Microphone access could not be started.");
+      toast.error("Microphone access could not be initialized.");
       setIsListening(false);
     }
   };
 
   useEffect(() => {
-    fetch("/api/creators?limit=50")
+    fetch("/api/creators?limit=100")
       .then((res) => res.json())
       .then((data) => {
         if (data.creators) setCreatorsList(data.creators);
@@ -119,10 +121,9 @@ export function AIPromptStudio({
   const handleSelectCreator = (c: CreatorProfile) => {
     if (onSelectCreator) {
       onSelectCreator(c);
-      toast.success(`Attached ${c.name}'s verified bank details!`);
+      toast.success(`Attached verified bank credentials for ${c.name}`);
     }
     setShowPicker(false);
-    // Optionally pre-fill prompt if empty
     if (!prompt.trim()) {
       setPrompt(`Generate invoice for ${c.name} for ₹2,500 for one promotional video.`);
     }
@@ -131,7 +132,7 @@ export function AIPromptStudio({
   const handleGenerate = async (textToUse?: string) => {
     const text = (textToUse || prompt).trim();
     if (!text) {
-      toast.error("Please enter an invoice request prompt.");
+      toast.error("Please enter invoice instructions or details.");
       return;
     }
 
@@ -145,18 +146,18 @@ export function AIPromptStudio({
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || "Failed to parse invoice with AI.");
+        throw new Error(err.error || "Failed to parse invoice.");
       }
 
       const data = await res.json();
       onParsed({ ...data, rawPrompt: text });
       toast.success(
         data.creatorMatched
-          ? `Invoice generated & matched for ${data.creatorName}!`
+          ? `Invoice parsed & matched with ${data.creatorName}'s file.`
           : `Invoice parsed for ${data.creatorName || "Creator"}. Please verify details.`
       );
     } catch (err: any) {
-      toast.error(err.message || "Error communicating with Groq AI.");
+      toast.error(err.message || "Error communicating with parsing engine.");
     } finally {
       setIsLoading(false);
     }
@@ -164,128 +165,162 @@ export function AIPromptStudio({
 
   const currentCreator = currentInvoice.creator;
 
+  const filteredCreators = creatorsList.filter((c) =>
+    c.name.toLowerCase().includes(creatorSearch.toLowerCase()) ||
+    (c.bank_name && c.bank_name.toLowerCase().includes(creatorSearch.toLowerCase()))
+  );
+
   return (
     <div className="space-y-4">
-      {/* Privacy guarantee banner */}
-      <div className="bg-emerald-50/80 border border-emerald-200/80 rounded-xl p-3 flex items-start gap-2.5 text-xs text-emerald-900">
-        <ShieldCheck className="w-4 h-4 text-emerald-600 mt-0.5 shrink-0" />
-        <div>
-          <strong className="font-semibold">Strict Data Privacy Safeguard:</strong> Sensitive creator
-          financials (Bank Account Number, IFSC, PAN, UPI) are <strong>never</strong> transmitted to
-          Groq or any LLM. They are queried securely on the server from PostgreSQL.
+      {/* Creator Quick Selector & Import Header */}
+      <div className="bg-white border border-slate-200/90 rounded-xl p-3 shadow-xs">
+        <div className="flex items-center justify-between gap-2 mb-2">
+          <div className="flex items-center gap-1.5 text-xs font-medium text-slate-700">
+            <Users className="w-3.5 h-3.5 text-slate-500" />
+            <span>Target Creator</span>
+          </div>
+          {onOpenImportModal && (
+            <button
+              type="button"
+              onClick={onOpenImportModal}
+              className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-600 hover:text-slate-900 cursor-pointer"
+            >
+              <UploadCloud className="w-3 h-3" />
+              <span>Import CSV/Excel</span>
+            </button>
+          )}
         </div>
-      </div>
 
-      {/* Creator Quick Selector & Import Toolbar */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-3.5 shadow-xs flex flex-wrap items-center justify-between gap-2.5 text-xs">
-        <div className="relative flex-1 min-w-[200px]">
+        <div className="relative">
           <button
             type="button"
             onClick={() => setShowPicker(!showPicker)}
-            className="w-full text-left bg-slate-50 hover:bg-slate-100/80 border border-slate-300 rounded-xl px-3 py-2 flex items-center justify-between transition-colors cursor-pointer"
+            className="w-full text-left bg-slate-50 hover:bg-slate-100/70 border border-slate-200 rounded-lg px-3 py-2 flex items-center justify-between transition-colors cursor-pointer text-xs"
           >
             <div className="flex items-center gap-2 truncate">
-              <Users className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-              <span className="truncate text-slate-800 font-medium">
-                {currentCreator?.name ? (
-                  <>
-                    <strong className="text-slate-900">{currentCreator.name}</strong>
-                    {currentCreator.bank_account && (
-                      <span className="text-slate-500 text-[11px] ml-1.5 font-mono">
-                        (•••• {currentCreator.bank_account.slice(-4)})
-                      </span>
-                    )}
-                  </>
-                ) : (
-                  <span className="text-slate-500">Pick from Uploaded Creators ({creatorsList.length})...</span>
-                )}
-              </span>
+              {currentCreator?.name ? (
+                <>
+                  <div className="w-5 h-5 rounded-full bg-slate-900 text-white flex items-center justify-center text-[10px] font-bold shrink-0">
+                    {currentCreator.name.charAt(0).toUpperCase()}
+                  </div>
+                  <span className="truncate text-slate-900 font-medium">{currentCreator.name}</span>
+                  {currentCreator.bank_account && (
+                    <span className="text-slate-500 text-[11px] font-mono shrink-0">
+                      (•••• {currentCreator.bank_account.slice(-4)})
+                    </span>
+                  )}
+                  {currentCreator.pan && (
+                    <span className="text-[10px] font-mono text-slate-400 uppercase hidden sm:inline">
+                      PAN: {currentCreator.pan}
+                    </span>
+                  )}
+                </>
+              ) : (
+                <span className="text-slate-500">Select verified creator from database ({creatorsList.length} available)...</span>
+              )}
             </div>
             <ChevronDown className={`w-3.5 h-3.5 text-slate-400 shrink-0 transition-transform ${showPicker ? "rotate-180" : ""}`} />
           </button>
 
-          {/* Quick Dropdown */}
+          {/* Searchable Dropdown */}
           {showPicker && (
-            <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-xl z-30 max-h-56 overflow-y-auto divide-y divide-slate-100">
-              <div className="p-2 bg-slate-50 text-[11px] text-slate-500 font-medium">
-                Click any creator to bind their bank credentials:
+            <div className="absolute left-0 right-0 top-full mt-1.5 bg-white border border-slate-200 rounded-xl shadow-lg z-30 max-h-64 overflow-hidden flex flex-col">
+              <div className="p-2 border-b border-slate-100 bg-slate-50">
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={creatorSearch}
+                    onChange={(e) => setCreatorSearch(e.target.value)}
+                    placeholder="Search creator by name or bank..."
+                    className="w-full pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-slate-900"
+                    autoFocus
+                  />
+                </div>
               </div>
-              {creatorsList.map((c) => (
-                <button
-                  key={c.id || c.name}
-                  type="button"
-                  onClick={() => handleSelectCreator(c)}
-                  className="w-full text-left p-2.5 hover:bg-emerald-50 transition-colors flex items-center justify-between text-xs cursor-pointer group"
-                >
-                  <div>
-                    <div className="font-semibold text-slate-900 group-hover:text-emerald-950">
-                      {c.name}
-                    </div>
-                    <div className="text-[10px] text-slate-500 font-mono">
-                      {c.bank_name ? `${c.bank_name} • ` : ""}
-                      {c.bank_account ? `A/C •••• ${c.bank_account.slice(-4)}` : "A/C not on file"}
-                    </div>
+              <div className="overflow-y-auto divide-y divide-slate-100 flex-1">
+                {filteredCreators.length === 0 ? (
+                  <div className="p-4 text-center text-xs text-slate-400">
+                    No creators found matching &ldquo;{creatorSearch}&rdquo;
                   </div>
-                  {currentCreator?.name === c.name && (
-                    <Check className="w-3.5 h-3.5 text-emerald-600" />
-                  )}
-                </button>
-              ))}
+                ) : (
+                  filteredCreators.map((c) => (
+                    <button
+                      key={c.id || c.name}
+                      type="button"
+                      onClick={() => handleSelectCreator(c)}
+                      className="w-full text-left p-2.5 hover:bg-slate-50 transition-colors flex items-center justify-between text-xs cursor-pointer group"
+                    >
+                      <div className="flex items-center gap-2.5 truncate">
+                        <div className="w-6 h-6 rounded-md bg-slate-100 text-slate-700 flex items-center justify-center text-[11px] font-semibold shrink-0 group-hover:bg-slate-900 group-hover:text-white transition-colors">
+                          {c.name.charAt(0).toUpperCase()}
+                        </div>
+                        <div className="truncate">
+                          <div className="font-medium text-slate-900 truncate">
+                            {c.name}
+                          </div>
+                          <div className="text-[10px] text-slate-500 font-mono">
+                            {c.bank_name ? `${c.bank_name} · ` : ""}
+                            {c.bank_account ? `•••• ${c.bank_account.slice(-4)}` : "A/C Pending"}
+                            {c.ifsc ? ` · ${c.ifsc}` : ""}
+                          </div>
+                        </div>
+                      </div>
+                      {currentCreator?.name === c.name && (
+                        <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                      )}
+                    </button>
+                  ))
+                )}
+              </div>
             </div>
           )}
         </div>
-
-        {onOpenImportModal && (
-          <button
-            type="button"
-            onClick={onOpenImportModal}
-            className="inline-flex items-center gap-1.5 px-3 py-2 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 rounded-xl font-semibold transition-colors cursor-pointer text-xs shrink-0"
-          >
-            <UploadCloud className="w-3.5 h-3.5 text-emerald-700" />
-            <span>Upload (CSV/Excel)</span>
-          </button>
-        )}
       </div>
 
-      {/* Prompt input card */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <label htmlFor="prompt-input" className="text-sm font-bold text-slate-800 flex items-center gap-2">
-            <Sparkles className="w-4 h-4 text-emerald-600" />
-            <span>Conversational & Voice Prompt</span>
-          </label>
+      {/* Main Parser Input Card */}
+      <div className="bg-white border border-slate-200/90 rounded-xl p-4 shadow-xs space-y-3">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-slate-900">
+              Natural Language Invoice Drafter
+            </span>
+            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">
+              LLaMA 3.3
+            </span>
+          </div>
+
           <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={toggleListening}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${
                 isListening
-                  ? "bg-red-500 hover:bg-red-600 text-white animate-pulse shadow-md shadow-red-200"
-                  : "bg-slate-100 hover:bg-emerald-50 text-slate-700 hover:text-emerald-800 border border-slate-200"
+                  ? "bg-red-600 text-white animate-pulse"
+                  : "bg-slate-100 hover:bg-slate-200/80 text-slate-700 border border-slate-200"
               }`}
-              title={isListening ? "Listening... click to stop" : "Click to speak prompt using Voice"}
+              title={isListening ? "Listening... click to stop" : "Speak invoice details using microphone"}
             >
               {isListening ? (
                 <>
-                  <MicOff className="w-3.5 h-3.5" />
-                  <span>Listening... Stop</span>
+                  <MicOff className="w-3 h-3" />
+                  <span>Listening</span>
                 </>
               ) : (
                 <>
-                  <Mic className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>Voice Input</span>
+                  <Mic className="w-3 h-3 text-slate-500" />
+                  <span>Voice</span>
                 </>
               )}
             </button>
-            <span className="text-xs text-slate-500 font-medium">Groq Cloud LLM</span>
           </div>
         </div>
 
         {isListening && (
-          <div className="bg-red-50 border border-red-200 rounded-xl p-2.5 flex items-center gap-2 text-xs text-red-700 animate-in fade-in">
-            <div className="w-2.5 h-2.5 bg-red-500 rounded-full animate-ping" />
+          <div className="bg-red-50 border border-red-200 rounded-lg p-2.5 flex items-center gap-2 text-xs text-red-700">
+            <span className="w-2 h-2 rounded-full bg-red-600 animate-ping shrink-0" />
             <span>
-              <strong>Microphone Active:</strong> Speak creator name, bank name (e.g. HDFC, ICICI, SBI), account number, amount...
+              <strong>Microphone Active:</strong> Speak creator name, bank details, deliverables, or fee...
             </span>
           </div>
         )}
@@ -296,8 +331,8 @@ export function AIPromptStudio({
             rows={4}
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
-            placeholder="e.g. Name: Rohan Sharma, 2 reels for ₹5,000, Bank Name: HDFC Bank, Account: 50100234567890, IFSC: HDFC0000123"
-            className="w-full text-sm rounded-xl border border-slate-300 p-3.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-all text-slate-900 placeholder:text-slate-400"
+            placeholder="Type or paste billing details: e.g. Bill Rohan Sharma ₹5,000 for 2 Instagram reels. Bank: HDFC Bank, Account: 50100234567890, IFSC: HDFC0000123"
+            className="w-full text-xs sm:text-sm rounded-lg border border-slate-200 p-3 focus:outline-none focus:ring-1 focus:ring-slate-900 focus:border-slate-900 transition-colors text-slate-900 placeholder:text-slate-400 font-sans leading-relaxed resize-none"
             disabled={isLoading}
             onKeyDown={(e) => {
               if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
@@ -305,14 +340,19 @@ export function AIPromptStudio({
               }
             }}
           />
+          <div className="absolute right-2.5 bottom-2.5 hidden sm:flex items-center gap-1 text-[10px] text-slate-400 font-mono">
+            <kbd className="px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200 text-slate-500">⌘</kbd>
+            <span>+</span>
+            <kbd className="px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200 text-slate-500">↵</kbd>
+          </div>
         </div>
 
-        {/* Quick Example Prompt Chips */}
-        <div className="space-y-1.5">
-          <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
-            Quick Examples:
+        {/* Quick Example Templates */}
+        <div className="space-y-1.5 pt-1">
+          <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
+            Quick Templates
           </span>
-          <div className="flex flex-col gap-1.5">
+          <div className="flex flex-col gap-1">
             {SAMPLE_PROMPTS.map((sample, idx) => (
               <button
                 key={idx}
@@ -322,59 +362,64 @@ export function AIPromptStudio({
                   handleGenerate(sample);
                 }}
                 disabled={isLoading}
-                className="text-left text-xs bg-slate-50 hover:bg-emerald-50/80 hover:text-emerald-900 border border-slate-200 hover:border-emerald-200 rounded-lg p-2 transition-all flex items-center justify-between group cursor-pointer disabled:opacity-50"
+                className="text-left text-xs bg-slate-50 hover:bg-slate-100 border border-slate-200/80 rounded-md px-2.5 py-1.5 transition-colors flex items-center justify-between group cursor-pointer disabled:opacity-50"
               >
-                <span className="truncate pr-2 text-slate-700 group-hover:text-emerald-900">
-                  &ldquo;{sample}&rdquo;
+                <span className="truncate pr-2 text-slate-600 font-sans group-hover:text-slate-900">
+                  {sample}
                 </span>
-                <ArrowRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-emerald-600 shrink-0 group-hover:translate-x-0.5 transition-transform" />
+                <ArrowRight className="w-3 h-3 text-slate-400 group-hover:text-slate-700 shrink-0" />
               </button>
             ))}
           </div>
         </div>
 
-        {/* Submit button */}
+        {/* Execute Button */}
         <button
           type="button"
           onClick={() => handleGenerate()}
           disabled={isLoading || !prompt.trim()}
-          className="w-full py-3 px-4 rounded-xl font-semibold text-sm text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 transition-all shadow-md shadow-emerald-600/20 flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
+          className="w-full py-2.5 px-4 rounded-lg font-medium text-xs text-white bg-slate-900 hover:bg-slate-800 transition-colors shadow-xs flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
         >
           {isLoading ? (
             <>
-              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-              <span>Parsing Prompt & Matching Database...</span>
+              <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              <span>Parsing & Matching Database...</span>
             </>
           ) : (
             <>
-              <Sparkles className="w-4 h-4" />
-              <span>Generate with AI</span>
+              <span>Parse & Generate Invoice</span>
+              <CornerDownLeft className="w-3 h-3 text-slate-400" />
             </>
           )}
         </button>
       </div>
 
-      {/* AI Bot Response Feedback Card */}
+      {/* Parser Audit Ledger / Inspection Response */}
       {botReply && (
-        <div className="bg-slate-900 text-slate-100 rounded-2xl p-4.5 shadow-md space-y-2 text-xs border border-slate-800">
-          <div className="flex items-center justify-between">
-            <span className="font-semibold text-emerald-400 flex items-center gap-1.5">
-              <Sparkles className="w-3.5 h-3.5" />
-              AI Assistant Analysis
+        <div className="bg-slate-900 text-slate-100 rounded-xl p-3.5 shadow-sm space-y-2 text-xs border border-slate-800">
+          <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+            <span className="font-semibold text-slate-200 text-xs flex items-center gap-1.5">
+              <span>Extraction Summary</span>
             </span>
             {currentInvoice.creatorMatched ? (
-              <span className="text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-0.5 rounded-full flex items-center gap-1">
-                <CheckCircle2 className="w-3 h-3 text-emerald-400" /> Matched Creator
+              <span className="text-[10px] font-medium bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-0.5 rounded flex items-center gap-1">
+                <CheckCircle2 className="w-3 h-3 text-emerald-400" /> Matched Directory
               </span>
             ) : (
-              <span className="text-[10px] bg-amber-950 text-amber-300 border border-amber-800 px-2 py-0.5 rounded-full flex items-center gap-1">
+              <span className="text-[10px] font-medium bg-amber-950 text-amber-300 border border-amber-800 px-2 py-0.5 rounded flex items-center gap-1">
                 <AlertTriangle className="w-3 h-3 text-amber-400" /> Missing Profile
               </span>
             )}
           </div>
-          <p className="text-slate-300 leading-relaxed">{botReply}</p>
+          <p className="text-slate-300 text-xs leading-relaxed font-sans">{botReply}</p>
         </div>
       )}
+
+      {/* Privacy Safeguard notice */}
+      <div className="flex items-center gap-2 text-[11px] text-slate-500 px-1">
+        <ShieldCheck className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+        <span>Bank details, PAN & IFSC are merged securely on the server from PostgreSQL and never shared with public APIs.</span>
+      </div>
     </div>
   );
 }

@@ -127,8 +127,8 @@ export async function generateInvoiceExcelBuffer(data: InvoiceExcelPayload): Pro
     ws.getCell("D9").value = `Invoice No: ${data.invoice_number}`;
     ws.getCell("D10").value = `Invoice Date:${data.invoice_date}`;
     ws.getCell("D11").value = `Terms of Payment: ${data.payment_terms || "Bank Transfer Or UPICode"}`;
-    ws.getCell("D14").value = `MSME Regsistration Status : ${c.is_msme ? "YES" : "NO"}`;
-    ws.getCell("D15").value = `If Yes : MSME No :${c.msme_registration_no || (c.is_msme ? "UDYAM-MH-18-0490710" : "N/A")}`;
+    ws.getCell("D14").value = "MSME Regsistration Status : YES / NO";
+    ws.getCell("D15").value = "If Yes : MSME No :UDYAM-MH-18-0490710";
 
     // 3. Line Items
     const qty = data.quantity || 1;
@@ -241,8 +241,8 @@ export async function generateInvoiceExcelBuffer(data: InvoiceExcelPayload): Pro
     ws.getCell("D9").font = { name: "Arial", size: 10, bold: true };
     ws.getCell("D10").value = `Invoice Date:${data.invoice_date}`;
     ws.getCell("D11").value = `Terms of Payment: ${data.payment_terms || "Bank Transfer Or UPICode"}`;
-    ws.getCell("D14").value = `MSME Regsistration Status : ${c.is_msme ? "YES" : "NO"}`;
-    ws.getCell("D15").value = `If Yes : MSME No :${c.msme_registration_no || (c.is_msme ? "UDYAM-MH-18-0490710" : "N/A")}`;
+    ws.getCell("D14").value = "MSME Regsistration Status : YES / NO";
+    ws.getCell("D15").value = "If Yes : MSME No :UDYAM-MH-18-0490710";
 
     // Items table header
     ws.mergeCells("B17:C17");

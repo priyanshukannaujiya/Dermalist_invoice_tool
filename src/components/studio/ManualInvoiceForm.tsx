@@ -140,22 +140,22 @@ export function ManualInvoiceForm({
   const hasBankDetails = Boolean(c.bank_account && c.ifsc);
 
   return (
-    <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-5">
+    <div className="bg-white border border-slate-200/90 rounded-xl p-4 shadow-xs space-y-4">
       {/* 1. Creator Autocomplete Search & Quick Import */}
       <div className="space-y-1.5 relative">
         <div className="flex items-center justify-between">
-          <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-            <UserCheck className="w-4 h-4 text-emerald-600" />
-            <span>Creator / Influencer Search</span>
+          <label className="text-xs font-medium text-slate-700 flex items-center gap-1.5">
+            <UserCheck className="w-3.5 h-3.5 text-slate-500" />
+            <span>Payee Creator</span>
           </label>
           {onOpenImportModal && (
             <button
               type="button"
               onClick={onOpenImportModal}
-              className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 px-2.5 py-1 rounded-lg border border-emerald-200 transition-colors cursor-pointer"
+              className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-600 hover:text-slate-900 cursor-pointer"
             >
-              <UploadCloud className="w-3.5 h-3.5" />
-              <span>Upload CSV/Excel</span>
+              <UploadCloud className="w-3 h-3" />
+              <span>Import Directory</span>
             </button>
           )}
         </div>
@@ -172,9 +172,9 @@ export function ManualInvoiceForm({
             onFocus={() => setShowDropdown(true)}
             onBlur={handleNameBlur}
             placeholder="Type creator name to search directory..."
-            className="w-full text-sm rounded-xl border border-slate-300 pl-9 pr-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+            className="w-full text-xs sm:text-sm rounded-lg border border-slate-200 pl-8 pr-3 py-2 focus:outline-none focus:ring-1 focus:ring-slate-900 focus:border-slate-900 bg-white"
           />
-          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
         </div>
 
         {/* Dropdown list */}
@@ -238,89 +238,89 @@ export function ManualInvoiceForm({
       {/* 2. Metadata: Invoice No & Date */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div className="space-y-1">
-          <label className="text-xs font-semibold text-slate-700">Invoice Number</label>
+          <label className="text-xs font-medium text-slate-700">Invoice Number</label>
           <input
             type="text"
             value={invoice.invoice_number}
             onChange={(e) => handleFieldChange("invoice_number", e.target.value)}
-            className="w-full text-sm font-mono rounded-xl border border-slate-300 px-3 py-2 focus:ring-2 focus:ring-emerald-500"
+            className="w-full text-xs sm:text-sm font-mono rounded-lg border border-slate-200 px-3 py-2 focus:outline-none focus:ring-1 focus:ring-slate-900 bg-white"
           />
         </div>
 
         <div className="space-y-1">
-          <label className="text-xs font-semibold text-slate-700">Invoice Date (DD-MM-YYYY)</label>
+          <label className="text-xs font-medium text-slate-700">Invoice Date (DD-MM-YYYY)</label>
           <input
             type="text"
             value={invoice.invoice_date}
             onChange={(e) => handleFieldChange("invoice_date", e.target.value)}
             placeholder="29-10-2026"
-            className="w-full text-sm rounded-xl border border-slate-300 px-3 py-2 focus:ring-2 focus:ring-emerald-500"
+            className="w-full text-xs sm:text-sm rounded-lg border border-slate-200 px-3 py-2 focus:outline-none focus:ring-1 focus:ring-slate-900 bg-white font-mono"
           />
         </div>
       </div>
 
       {/* 3. Deliverable / Video Description & Link */}
-      <div className="space-y-3">
+      <div className="space-y-2.5">
         <div className="space-y-1">
-          <label className="text-xs font-semibold text-slate-700">Service Description</label>
+          <label className="text-xs font-medium text-slate-700">Service Description</label>
           <input
             type="text"
             value={invoice.service_description}
             onChange={(e) => handleFieldChange("service_description", e.target.value)}
             placeholder="1 x Promotional Video for Dermalist"
-            className="w-full text-sm rounded-xl border border-slate-300 px-3 py-2 focus:ring-2 focus:ring-emerald-500"
+            className="w-full text-xs sm:text-sm rounded-lg border border-slate-200 px-3 py-2 focus:outline-none focus:ring-1 focus:ring-slate-900 bg-white"
           />
         </div>
 
         <div className="space-y-1">
-          <label className="text-xs font-semibold text-slate-700">Deliverable / Video Link</label>
+          <label className="text-xs font-medium text-slate-700">Deliverable / Video Link</label>
           <input
             type="text"
             value={invoice.video_link || ""}
             onChange={(e) => handleFieldChange("video_link", e.target.value)}
-            placeholder="https://www.instagram.com/reel/abc123"
-            className="w-full text-sm rounded-xl border border-slate-300 px-3 py-2 focus:ring-2 focus:ring-emerald-500"
+            placeholder="https://www.instagram.com/reel/..."
+            className="w-full text-xs sm:text-sm rounded-lg border border-slate-200 px-3 py-2 focus:outline-none focus:ring-1 focus:ring-slate-900 bg-white"
           />
         </div>
       </div>
 
       {/* 4. Financials: Quantity, Price, Discount, Totals */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-50/80 p-3.5 rounded-xl border border-slate-200">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 bg-slate-50/80 p-3 rounded-lg border border-slate-200">
         <div className="space-y-1">
-          <label className="text-[11px] font-semibold text-slate-600">Quantity</label>
+          <label className="text-[10px] font-mono uppercase text-slate-500">Qty</label>
           <input
             type="number"
             min={1}
             value={invoice.quantity}
             onChange={(e) => handleFieldChange("quantity", e.target.value)}
-            className="w-full text-sm rounded-lg border border-slate-300 px-2.5 py-1.5 bg-white"
+            className="w-full text-xs rounded-md border border-slate-200 px-2 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-slate-900"
           />
         </div>
 
         <div className="space-y-1">
-          <label className="text-[11px] font-semibold text-slate-600">Taxable Value (₹)</label>
+          <label className="text-[10px] font-mono uppercase text-slate-500">Taxable (₹)</label>
           <input
             type="number"
             value={invoice.taxable_value}
             onChange={(e) => handleFieldChange("taxable_value", e.target.value)}
-            className="w-full text-sm rounded-lg border border-slate-300 px-2.5 py-1.5 bg-white font-mono"
+            className="w-full text-xs rounded-md border border-slate-200 px-2 py-1.5 bg-white font-mono focus:outline-none focus:ring-1 focus:ring-slate-900"
           />
         </div>
 
         <div className="space-y-1">
-          <label className="text-[11px] font-semibold text-slate-600">Discount (₹)</label>
+          <label className="text-[10px] font-mono uppercase text-slate-500">Discount (₹)</label>
           <input
             type="number"
             min={0}
             value={invoice.discount}
             onChange={(e) => handleFieldChange("discount", e.target.value)}
-            className="w-full text-sm rounded-lg border border-slate-300 px-2.5 py-1.5 bg-white font-mono"
+            className="w-full text-xs rounded-md border border-slate-200 px-2 py-1.5 bg-white font-mono focus:outline-none focus:ring-1 focus:ring-slate-900"
           />
         </div>
 
         <div className="space-y-1">
-          <label className="text-[11px] font-bold text-emerald-800">Balance Due (₹)</label>
-          <div className="w-full text-sm font-bold text-emerald-700 bg-emerald-100/60 border border-emerald-300 rounded-lg px-2.5 py-1.5 font-mono">
+          <label className="text-[10px] font-mono uppercase font-semibold text-slate-700">Due (₹)</label>
+          <div className="w-full text-xs font-bold text-slate-950 bg-white border border-slate-200 rounded-md px-2 py-1.5 font-mono">
             ₹{invoice.balance_due.toLocaleString("en-IN")}
           </div>
         </div>

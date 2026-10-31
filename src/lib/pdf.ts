@@ -105,10 +105,10 @@ export async function generateInvoicePdfBuffer(data: InvoiceExcelPayload): Promi
   doc.text(`${data.payment_terms || "Bank Transfer Or UPI"}`, metaX + 80, y + 40);
 
   doc.text(`MSME Status:`, metaX + 12, y + 54);
-  doc.text(`${c.is_msme ? "YES" : "NO"}`, metaX + 80, y + 54);
+  doc.text(`YES / NO`, metaX + 80, y + 54);
 
-  doc.text(`UDYAM No:`, metaX + 12, y + 68);
-  doc.text(`${c.msme_registration_no || "N/A"}`, metaX + 80, y + 68);
+  doc.text(`MSME No:`, metaX + 12, y + 68);
+  doc.text(`UDYAM-MH-18-0490710`, metaX + 80, y + 68);
 
   // 3. Bill To Box
   y = Math.max(nextLeftY + 42, y + 105);

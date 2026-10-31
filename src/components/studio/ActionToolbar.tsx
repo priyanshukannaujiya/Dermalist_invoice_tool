@@ -3,9 +3,16 @@
 import React, { useState } from "react";
 import { InvoiceDraft } from "@/types/invoice";
 import { formatCurrencyINR } from "@/lib/utils";
-import confetti from "canvas-confetti";
 import { toast } from "sonner";
-import { FileSpreadsheet, FileText, BookmarkCheck, Copy, Check, Loader2 } from "lucide-react";
+import {
+  FileSpreadsheet,
+  FileText,
+  BookmarkCheck,
+  Copy,
+  Check,
+  Loader2,
+  CheckCircle2,
+} from "lucide-react";
 
 interface ActionToolbarProps {
   invoice: InvoiceDraft;
@@ -17,15 +24,6 @@ export function ActionToolbar({ invoice, onSaved }: ActionToolbarProps) {
   const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [savingHistory, setSavingHistory] = useState(false);
   const [copied, setCopied] = useState(false);
-
-  const triggerConfetti = () => {
-    confetti({
-      particleCount: 50,
-      spread: 60,
-      origin: { y: 0.8 },
-      colors: ["#10b981", "#059669", "#34d399", "#3b82f6"],
-    });
-  };
 
   const handleDownloadExcel = async () => {
     try {
@@ -52,8 +50,7 @@ export function ActionToolbar({ invoice, onSaved }: ActionToolbarProps) {
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
 
-      triggerConfetti();
-      toast.success("Excel (.xlsx) workbook downloaded successfully!");
+      toast.success("Excel (.xlsx) workbook downloaded successfully.");
     } catch (err: any) {
       toast.error(err.message || "Failed to download Excel file.");
     } finally {
@@ -86,8 +83,7 @@ export function ActionToolbar({ invoice, onSaved }: ActionToolbarProps) {
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
 
-      triggerConfetti();
-      toast.success("PDF document downloaded successfully!");
+      toast.success("PDF document downloaded successfully.");
     } catch (err: any) {
       toast.error(err.message || "Failed to download PDF document.");
     } finally {
@@ -98,36 +94,18 @@ export function ActionToolbar({ invoice, onSaved }: ActionToolbarProps) {
   const handleSaveToHistory = async () => {
     try {
       setSavingHistory(true);
-      const payload = {
-        invoice_number: invoice.invoice_number,
-        creator_id: invoice.creator?.id || null,
-        creator_name: invoice.creator?.name || "Creator",
-        invoice_date: invoice.invoice_date,
-        service_description: invoice.service_description,
-        quantity: invoice.quantity,
-        unit_price: invoice.unit_price,
-        taxable_value: invoice.taxable_value,
-        discount: invoice.discount,
-        subtotal_less_discount: invoice.subtotal_less_discount,
-        balance_due: invoice.balance_due,
-        payment_terms: invoice.payment_terms,
-        video_link: invoice.video_link,
-        status: "Generated",
-        raw_prompt: invoice.raw_prompt,
-      };
-
       const res = await fetch("/api/invoices", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(invoice),
       });
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || "Failed to save invoice.");
+        throw new Error(err.error || "Failed to archive invoice.");
       }
 
-      toast.success(`Invoice ${invoice.invoice_number} saved to archive!`);
+      toast.success(`Invoice ${invoice.invoice_number} saved to archive.`);
       if (onSaved) onSaved();
     } catch (err: any) {
       toast.error(err.message || "Failed to save invoice to database.");
@@ -151,64 +129,68 @@ export function ActionToolbar({ invoice, onSaved }: ActionToolbarProps) {
 
     navigator.clipboard.writeText(summary);
     setCopied(true);
-    toast.success("Invoice summary copied to clipboard!");
+    toast.success("Invoice summary copied to clipboard.");
     setTimeout(() => setCopied(false), 2000);
   };
 
   return (
-    <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-sm flex flex-wrap items-center justify-between gap-3">
+    <div className="bg-white border border-slate-200/90 rounded-xl p-3 shadow-xs flex flex-wrap items-center justify-between gap-3">
+      {/* Primary Export Actions */}
       <div className="flex items-center gap-2">
         <button
           onClick={handleDownloadExcel}
           disabled={downloadingExcel}
-          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-xs text-emerald-950 bg-emerald-100 hover:bg-emerald-200 border border-emerald-300 transition-all shadow-xs disabled:opacity-60 cursor-pointer"
+          className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg font-medium text-xs text-white bg-emerald-600 hover:bg-emerald-700 transition-colors shadow-xs disabled:opacity-50 cursor-pointer"
         >
           {downloadingExcel ? (
-            <Loader2 className="w-4 h-4 animate-spin text-emerald-700" />
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
           ) : (
-            <FileSpreadsheet className="w-4 h-4 text-emerald-700" />
+            <FileSpreadsheet className="w-3.5 h-3.5" />
           )}
-          <span>Download Excel (.xlsx)</span>
+          <span>Export Excel</span>
+          <span className="text-[10px] bg-emerald-700/60 font-mono px-1.5 py-0.2 rounded">.xlsx</span>
         </button>
 
         <button
           onClick={handleDownloadPdf}
           disabled={downloadingPdf}
-          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-xs text-white bg-slate-900 hover:bg-slate-800 transition-all shadow-xs disabled:opacity-60 cursor-pointer"
+          className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg font-medium text-xs text-white bg-slate-900 hover:bg-slate-800 transition-colors shadow-xs disabled:opacity-50 cursor-pointer"
         >
           {downloadingPdf ? (
-            <Loader2 className="w-4 h-4 animate-spin text-slate-300" />
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
           ) : (
-            <FileText className="w-4 h-4 text-emerald-400" />
+            <FileText className="w-3.5 h-3.5" />
           )}
-          <span>Download PDF</span>
+          <span>Export PDF</span>
+          <span className="text-[10px] bg-slate-800 font-mono px-1.5 py-0.2 rounded text-slate-300">.pdf</span>
         </button>
       </div>
 
+      {/* Secondary Actions */}
       <div className="flex items-center gap-2">
         <button
           onClick={handleSaveToHistory}
           disabled={savingHistory}
-          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 transition-all border border-slate-200 cursor-pointer disabled:opacity-60"
+          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 transition-colors cursor-pointer disabled:opacity-50"
         >
           {savingHistory ? (
             <Loader2 className="w-3.5 h-3.5 animate-spin" />
           ) : (
-            <BookmarkCheck className="w-3.5 h-3.5 text-slate-600" />
+            <BookmarkCheck className="w-3.5 h-3.5 text-slate-500" />
           )}
-          <span>Save to History</span>
+          <span>Save to Archive</span>
         </button>
 
         <button
           onClick={handleCopySummary}
-          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 transition-all border border-slate-200 cursor-pointer"
+          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 transition-colors cursor-pointer"
         >
           {copied ? (
             <Check className="w-3.5 h-3.5 text-emerald-600" />
           ) : (
-            <Copy className="w-3.5 h-3.5 text-slate-600" />
+            <Copy className="w-3.5 h-3.5 text-slate-500" />
           )}
-          <span>{copied ? "Copied!" : "Copy Summary"}</span>
+          <span>{copied ? "Copied" : "Copy Summary"}</span>
         </button>
       </div>
     </div>

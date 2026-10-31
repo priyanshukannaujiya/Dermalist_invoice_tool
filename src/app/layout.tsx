@@ -32,13 +32,13 @@ export default function RootLayout({
       <body className="antialiased bg-slate-50 text-slate-900 min-h-screen flex flex-col font-sans">
         <Navigation />
         <main className="flex-1 flex flex-col">{children}</main>
-        <footer className="border-t border-slate-200 bg-white py-4 px-6 text-center text-xs text-slate-500">
+        <footer className="border-t border-slate-200/80 bg-white py-3 px-6 text-[11px] text-slate-500">
           <div className="max-w-7xl mx-auto flex flex-col sm:flex-row justify-between items-center gap-2">
-            <span>
-              <strong>Dermalist</strong> &bull; B M M RETAIL PRIVATE LIMITED &bull; Non-GST Invoice Studio
+            <span className="font-sans">
+              <strong className="text-slate-900 font-semibold">Dermalist</strong> &bull; B M M Retail Private Limited &bull; Enterprise Invoice Ops
             </span>
-            <span className="text-slate-400">
-              Powered by Next.js 15, Neon PostgreSQL & Groq Cloud AI
+            <span className="text-slate-400 font-mono text-[10px]">
+              v2.4 &bull; Next.js 15 &bull; Neon PostgreSQL
             </span>
           </div>
         </footer>
