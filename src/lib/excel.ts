@@ -64,11 +64,13 @@ async function sanitizeExcelBuffer(buffer: Buffer): Promise<Buffer> {
   const cleanNodeBuffer = await zip.generateAsync({
     type: "nodebuffer",
     compression: "DEFLATE",
-    compressionOptions: { level: 6 },
+    compressionOptions: { level: 3 },
   });
 
   return cleanNodeBuffer;
 }
+
+let cachedTemplateBuffer: Buffer | null = null;
 
 export async function generateInvoiceExcelBuffer(data: InvoiceExcelPayload): Promise<Buffer> {
   const workbook = new ExcelJS.Workbook();
@@ -109,10 +111,17 @@ export async function generateInvoiceExcelBuffer(data: InvoiceExcelPayload): Pro
 
   c.bank_name = resolveBankName(c.bank_name, c.ifsc);
 
-  const hasTemplate = fs.existsSync(templatePath);
+  // In-memory cache for template buffer to prevent redundant disk reads
+  if (!cachedTemplateBuffer && fs.existsSync(templatePath)) {
+    try {
+      cachedTemplateBuffer = fs.readFileSync(templatePath);
+    } catch (err) {
+      console.warn("Failed to read template into cache:", err);
+    }
+  }
 
-  if (hasTemplate) {
-    await workbook.xlsx.readFile(templatePath);
+  if (cachedTemplateBuffer) {
+    await workbook.xlsx.load(cachedTemplateBuffer);
     workbook.calcProperties.fullCalcOnLoad = true;
     const ws = workbook.worksheets[0];
 

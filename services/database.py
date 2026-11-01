@@ -172,9 +172,8 @@ def execute_query(query: str, params: tuple = (), fetch_one: bool = False, fetch
                 if attempt == 0:
                     import time
                     time.sleep(0.3)
-                    continue
-                # If retry also fails, fall back to SQLite
-                break
+                # If retry also fails, do not silently fall back when PostgreSQL is configured
+                raise RuntimeError(f"Neon PostgreSQL query failed: {str(e)}") from e
 
     # SQLite execution
     conn = get_sqlite_connection(db_path)
@@ -644,6 +643,41 @@ def check_invoice_number_exists(invoice_number: str, db_path: Optional[str] = No
     """Check if invoice number is already taken."""
     res = execute_query("SELECT 1 as exists_flag FROM invoices WHERE invoice_number = ? LIMIT 1", (invoice_number.strip(),), fetch_one=True, db_path=db_path)
     return res is not None
+
+
+def reserve_invoice_numbers(count: int, prefix: Optional[str] = None, db_path: Optional[str] = None) -> List[str]:
+    """
+    Pre-allocate `count` unique sequential invoice numbers in one operation.
+    Safe for concurrent bulk generation — all numbers are checked before returning.
+    Returns a list of invoice number strings (length == count).
+    """
+    pfx = prefix or os.getenv("INVOICE_PREFIX", "DL-")
+    reserved: List[str] = []
+    # Start from next available number beyond what's already in DB
+    row = execute_query(
+        "SELECT invoice_number FROM invoices WHERE invoice_number LIKE ? ORDER BY id DESC LIMIT 1",
+        (f"{pfx}%",),
+        fetch_one=True,
+        db_path=db_path,
+    )
+    if row:
+        last_no = row["invoice_number"]
+        suffix = last_no[len(pfx):]
+        digits = "".join(c for c in suffix if c.isdigit())
+        try:
+            next_int = int(digits) + 1 if digits else 1
+        except ValueError:
+            next_int = 1
+    else:
+        next_int = int(os.getenv("INVOICE_START_NUMBER", "1"))
+
+    while len(reserved) < count:
+        candidate = f"{pfx}{next_int:03d}"
+        if not check_invoice_number_exists(candidate, db_path):
+            reserved.append(candidate)
+        next_int += 1
+
+    return reserved
 
 
 def create_invoice(data: Dict[str, Any], db_path: Optional[str] = None) -> int:

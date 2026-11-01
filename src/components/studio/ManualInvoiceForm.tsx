@@ -20,43 +20,74 @@ interface ManualInvoiceFormProps {
   invoice: InvoiceDraft;
   onChange: (updated: InvoiceDraft) => void;
   onOpenImportModal?: () => void;
+  availableCreators?: CreatorProfile[];
 }
 
 export function ManualInvoiceForm({
   invoice,
   onChange,
   onOpenImportModal,
+  availableCreators,
 }: ManualInvoiceFormProps) {
-  const [creatorsList, setCreatorsList] = useState<CreatorProfile[]>([]);
+  const [creatorsList, setCreatorsList] = useState<CreatorProfile[]>(availableCreators || []);
   const [searchTerm, setSearchTerm] = useState("");
   const [isSearching, setIsSearching] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
   const [showBankDetails, setShowBankDetails] = useState(false);
 
-  // Fetch creators for autocomplete
+  // Sync with availableCreators prop
   useEffect(() => {
+    if (availableCreators && availableCreators.length > 0) {
+      setCreatorsList(availableCreators);
+    }
+  }, [availableCreators]);
+
+  // Fast autocomplete with local search first, then debounced API fetch for large directories
+  useEffect(() => {
+    if (!searchTerm.trim()) {
+      if (availableCreators && availableCreators.length > 0) {
+        setCreatorsList(availableCreators);
+      }
+      return;
+    }
+
+    // Fast local filter
+    const lower = searchTerm.toLowerCase();
+    if (availableCreators && availableCreators.length > 0) {
+      const localMatches = availableCreators.filter((c) =>
+        c.name.toLowerCase().includes(lower) ||
+        (c.bank_name && c.bank_name.toLowerCase().includes(lower)) ||
+        (c.pan && c.pan.toLowerCase().includes(lower))
+      );
+      if (localMatches.length > 0) {
+        setCreatorsList(localMatches);
+      }
+    }
+
+    // Debounced server search fallback
     let active = true;
-    const fetchCreators = async () => {
+    const timer = setTimeout(async () => {
       try {
         setIsSearching(true);
         const res = await fetch(`/api/creators?limit=25&search=${encodeURIComponent(searchTerm)}`);
         if (res.ok && active) {
           const data = await res.json();
-          setCreatorsList(data.creators || []);
+          if (data.creators && data.creators.length > 0) {
+            setCreatorsList(data.creators);
+          }
         }
       } catch (err) {
         console.error("Error searching creators:", err);
       } finally {
         if (active) setIsSearching(false);
       }
-    };
+    }, 200);
 
-    const timer = setTimeout(fetchCreators, 250);
     return () => {
       active = false;
       clearTimeout(timer);
     };
-  }, [searchTerm]);
+  }, [searchTerm, availableCreators]);
 
   const handleSelectCreator = (creator: CreatorProfile) => {
     onChange({

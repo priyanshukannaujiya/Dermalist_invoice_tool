@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 
 # Ensure backend services are imported
 from services import database
+from services.database import reserve_invoice_numbers
 from services.groq_service import GroqService, is_account_query, format_account_details_card
 from services.excel_service import ExcelService
 from services.pdf_service import PDFService
@@ -22,6 +23,7 @@ from services.validation import (
     normalize_date,
     validate_creator_payload,
     validate_invoice_payload,
+    validate_bulk_records,
 )
 
 # Load environment configuration
@@ -36,6 +38,7 @@ st.set_page_config(
 )
 
 import base64
+import zipfile
 from PIL import Image
 
 # Services initialization cached across reruns for lightning speed
@@ -281,6 +284,16 @@ if "pending_draft" not in st.session_state:
 if "last_generated_invoice" not in st.session_state:
     st.session_state.last_generated_invoice = None
 
+# Bulk invoice session state
+if "bulk_records" not in st.session_state:
+    st.session_state.bulk_records = []          # list of validated record dicts
+if "bulk_results" not in st.session_state:
+    st.session_state.bulk_results = []          # list of {status, invoice, error}
+if "bulk_zip_bytes" not in st.session_state:
+    st.session_state.bulk_zip_bytes = None      # in-memory ZIP bytes for download
+if "bulk_mode" not in st.session_state:
+    st.session_state.bulk_mode = False          # True when user is in bulk flow
+
 
 # ==================== SIDEBAR ====================
 with st.sidebar:
@@ -503,6 +516,11 @@ elif page == "💬 Create Invoice":
         st.session_state.chat_messages = [st.session_state.chat_messages[0]]
         st.session_state.pending_draft = None
         st.session_state.last_generated_invoice = None
+        # Clear bulk state
+        st.session_state.bulk_records = []
+        st.session_state.bulk_results = []
+        st.session_state.bulk_zip_bytes = None
+        st.session_state.bulk_mode = False
         st.rerun()
 
     query_to_process = preset_chosen or (user_input.strip() if submit_clicked and user_input.strip() else None)
@@ -539,25 +557,67 @@ elif page == "💬 Create Invoice":
             st.session_state.chat_messages.append({"role": "assistant", "content": reply})
             st.rerun()
 
-        # 2. Otherwise parse invoice generation request with Groq
-        with st.spinner("🤖 Analyzing your invoice instruction with Groq..."):
-            # Convert session chat history for LLM context
-            history_for_llm = [
-                {"role": m["role"], "content": m["content"]}
-                for m in st.session_state.chat_messages
-                if m.get("content")
-            ]
-            extraction = groq_service.parse_invoice_request(query_to_process, chat_history=history_for_llm)
+        # 2. Detect multi-creator vs single-creator prompt
+        #    Heuristic: multiple '₹' symbols or numbered list patterns suggest bulk
+        rupee_count = query_to_process.count('₹') + len(re.findall(r'\b(?:rs\.?|inr)\s*\d', query_to_process, re.IGNORECASE))
+        numbered_creators = len(re.findall(r'(?:^|\n)\s*\d+[\)\.]\s', query_to_process))
+        is_bulk_request = rupee_count >= 2 or numbered_creators >= 2
 
-            bot_reply = extraction.get("bot_reply", "Understood your request.")
-            st.session_state.chat_messages.append({"role": "assistant", "content": bot_reply})
+        if is_bulk_request:
+            with st.spinner("🤖 Extracting multiple creator invoice records with Groq..."):
+                history_for_llm = [
+                    {"role": m["role"], "content": m["content"]}
+                    for m in st.session_state.chat_messages
+                    if m.get("content")
+                ]
+                bulk_result = groq_service.parse_bulk_invoice_request(
+                    query_to_process, chat_history=history_for_llm
+                )
 
-            if extraction.get("is_complete"):
-                # Prepare draft with Python calculations and creator matching
-                draft = invoice_service.prepare_invoice_draft(extraction)
-                st.session_state.pending_draft = draft
-            else:
-                st.session_state.pending_draft = None
+                if bulk_result.get("error"):
+                    st.session_state.chat_messages.append({
+                        "role": "assistant",
+                        "content": f"⚠️ Bulk parse error: {bulk_result['error']}"
+                    })
+                    st.session_state.bulk_mode = False
+                else:
+                    raw_recs = bulk_result.get("records", [])
+                    validated = validate_bulk_records(raw_recs)
+                    st.session_state.bulk_records = validated
+                    st.session_state.bulk_results = []
+                    st.session_state.bulk_zip_bytes = None
+                    st.session_state.bulk_mode = True
+                    st.session_state.pending_draft = None
+                    summary = bulk_result.get("summary", f"Extracted {len(validated)} creator invoice records.")
+                    n_ok = sum(1 for r in validated if r["is_valid"])
+                    st.session_state.chat_messages.append({
+                        "role": "assistant",
+                        "content": (
+                            f"📦 **Bulk mode activated!** {summary}\n\n"
+                            f"**{n_ok}/{len(validated)}** records are ready to generate. "
+                            f"Please review the preview table below, correct any flagged fields, "
+                            f"then click **🚀 Generate All Invoices**."
+                        )
+                    })
+        else:
+            # Single-invoice path (unchanged)
+            with st.spinner("🤖 Analyzing your invoice instruction with Groq..."):
+                history_for_llm = [
+                    {"role": m["role"], "content": m["content"]}
+                    for m in st.session_state.chat_messages
+                    if m.get("content")
+                ]
+                extraction = groq_service.parse_invoice_request(query_to_process, chat_history=history_for_llm)
+
+                bot_reply = extraction.get("bot_reply", "Understood your request.")
+                st.session_state.chat_messages.append({"role": "assistant", "content": bot_reply})
+
+                if extraction.get("is_complete"):
+                    draft = invoice_service.prepare_invoice_draft(extraction)
+                    st.session_state.pending_draft = draft
+                    st.session_state.bulk_mode = False
+                else:
+                    st.session_state.pending_draft = None
 
         st.rerun()
 
@@ -742,8 +802,278 @@ elif page == "💬 Create Invoice":
                         except Exception as e:
                             st.error(f"Error generating invoice: {str(e)}")
 
-    # ==================== DOWNLOAD SECTION ====================
+    # ==================== BULK INVOICE PREVIEW & GENERATION ====================
+    if st.session_state.bulk_mode and st.session_state.bulk_records:
+        records = st.session_state.bulk_records
+        st.markdown("---")
+        st.markdown("### 📦 Bulk Invoice Preview & Editor")
+        st.info(
+            f"**{len(records)} creator invoice record(s) extracted.** "
+            "Review and correct any highlighted fields below, then click **🚀 Generate All Invoices**. "
+            "Each creator gets an individual Excel + PDF invoice."
+        )
+
+        # ---- Editable Preview Table ----
+        EDITABLE_COLS = [
+            "creator_name", "invoice_date", "service_description",
+            "quantity", "unit_price", "discount",
+            "address", "email", "phone",
+            "pan", "bank_account", "ifsc", "upi_id", "bank_name",
+            "video_link",
+        ]
+
+        # Visual summary chips for flagged issues
+        n_missing_names = sum(1 for r in records if r.get("field_flags", {}).get("creator_name") == "missing")
+        n_missing_price = sum(1 for r in records if r.get("field_flags", {}).get("unit_price") == "missing")
+        n_bad_pan = sum(1 for r in records if r.get("field_flags", {}).get("pan") == "invalid")
+        n_bad_ifsc = sum(1 for r in records if r.get("field_flags", {}).get("ifsc") == "invalid")
+        n_missing_pay = sum(1 for r in records if r.get("field_flags", {}).get("payment") == "missing")
+
+        chips = []
+        if n_missing_names:
+            chips.append(f"<span style='background:#fee2e2;color:#b91c1c;padding:3px 10px;border-radius:12px;font-size:0.8rem;font-weight:600;'>🔴 Missing Name: {n_missing_names}</span>")
+        if n_missing_price:
+            chips.append(f"<span style='background:#fee2e2;color:#b91c1c;padding:3px 10px;border-radius:12px;font-size:0.8rem;font-weight:600;'>🔴 Missing Amount: {n_missing_price}</span>")
+        if n_bad_pan:
+            chips.append(f"<span style='background:#ffedd5;color:#c2410c;padding:3px 10px;border-radius:12px;font-size:0.8rem;font-weight:600;'>🟠 Invalid PAN: {n_bad_pan}</span>")
+        if n_bad_ifsc:
+            chips.append(f"<span style='background:#ffedd5;color:#c2410c;padding:3px 10px;border-radius:12px;font-size:0.8rem;font-weight:600;'>🟠 Invalid IFSC: {n_bad_ifsc}</span>")
+        if n_missing_pay:
+            chips.append(f"<span style='background:#fef9c3;color:#854d0e;padding:3px 10px;border-radius:12px;font-size:0.8rem;font-weight:600;'>🟡 Missing Payment Info: {n_missing_pay}</span>")
+
+        if chips:
+            st.markdown("<div style='display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;'>" + "".join(chips) + "</div>", unsafe_allow_html=True)
+
+        # Build display rows
+        preview_rows = []
+        for rec in records:
+            row = {col: rec.get(col, "") or "" for col in EDITABLE_COLS}
+            row["quantity"] = int(rec.get("quantity") or 1)
+            row["unit_price"] = float(rec.get("unit_price") or 0.0)
+            row["discount"] = float(rec.get("discount") or 0.0)
+            errs = rec.get("validation_errors", [])
+            warns = rec.get("validation_warnings", [])
+            if errs:
+                row["⚠️ Issues"] = "❌ " + "; ".join(errs)
+            elif warns:
+                row["⚠️ Issues"] = "⚠️ " + "; ".join(warns)
+            else:
+                row["⚠️ Issues"] = "✅ Ready"
+            preview_rows.append(row)
+
+        import pandas as pd
+
+        preview_df = pd.DataFrame(preview_rows)
+
+        edited_df = st.data_editor(
+            preview_df,
+            use_container_width=True,
+            num_rows="fixed",
+            key="bulk_editor",
+            column_config={
+                "creator_name": st.column_config.TextColumn("Creator Name *", required=True),
+                "invoice_date": st.column_config.TextColumn("Invoice Date (DD-MM-YYYY)"),
+                "service_description": st.column_config.TextColumn("Service Description *", required=True),
+                "quantity": st.column_config.NumberColumn("Qty", min_value=1, step=1),
+                "unit_price": st.column_config.NumberColumn("Amount ₹ *", min_value=0.0, step=100.0, format="₹%.2f"),
+                "discount": st.column_config.NumberColumn("Discount ₹", min_value=0.0, step=50.0, format="₹%.2f"),
+                "pan": st.column_config.TextColumn("PAN"),
+                "ifsc": st.column_config.TextColumn("IFSC"),
+                "bank_account": st.column_config.TextColumn("Bank Account"),
+                "upi_id": st.column_config.TextColumn("UPI ID"),
+                "bank_name": st.column_config.TextColumn("Bank Name"),
+                "address": st.column_config.TextColumn("Address"),
+                "email": st.column_config.TextColumn("Email"),
+                "phone": st.column_config.TextColumn("Phone"),
+                "video_link": st.column_config.TextColumn("Video Link"),
+                "⚠️ Issues": st.column_config.TextColumn("Validation", disabled=True),
+            },
+            hide_index=True,
+        )
+
+        # Count valid records after editing
+        from services.validation import validate_bulk_records as _vbr
+        edited_records_raw = edited_df.drop(columns=["⚠️ Issues"]).to_dict("records")
+        re_validated = _vbr(edited_records_raw)
+        n_valid = sum(1 for r in re_validated if r["is_valid"])
+        n_total = len(re_validated)
+
+        bk_col1, bk_col2, bk_col3 = st.columns([3, 1, 1])
+        with bk_col1:
+            if n_valid < n_total:
+                st.warning(f"⚠️ {n_total - n_valid} record(s) have validation issues. They will be skipped during generation.")
+            else:
+                st.success(f"✅ All {n_total} records are valid and ready for generation.")
+        with bk_col2:
+            if st.button("🔄 Re-Validate", use_container_width=True, key="bulk_revalidate"):
+                st.session_state.bulk_records = re_validated
+                st.rerun()
+        with bk_col3:
+            cancel_bulk = st.button("✖ Cancel Bulk", use_container_width=True, key="bulk_cancel")
+            if cancel_bulk:
+                st.session_state.bulk_mode = False
+                st.session_state.bulk_records = []
+                st.session_state.bulk_results = []
+                st.session_state.bulk_zip_bytes = None
+                st.rerun()
+
+        st.markdown("---")
+
+        # ---- Previously generated results (if any) ----
+        if st.session_state.bulk_results:
+            st.markdown("#### 📋 Generation Results")
+            for res in st.session_state.bulk_results:
+                if res["status"] == "success":
+                    inv = res["invoice"]
+                    st.success(
+                        f"✅ **{inv['invoice_number']}** — {inv['creator_name']} — ₹{inv['balance_due']:,.2f}",
+                    )
+                else:
+                    st.error(f"❌ **{res['creator_name']}** — {res['error']}")
+
+        # ---- Generate All button ----
+        already_done_names = {
+            r["invoice"]["creator_name"]
+            for r in st.session_state.bulk_results
+            if r["status"] == "success"
+        }
+        pending_records = [r for r in re_validated if r["is_valid"] and r.get("creator_name") not in already_done_names]
+
+        if pending_records:
+            gen_all_btn = st.button(
+                f"🚀 Generate All Invoices ({len(pending_records)} remaining)",
+                type="primary",
+                use_container_width=True,
+                key="bulk_generate_all",
+            )
+
+            if gen_all_btn:
+                # Pre-allocate invoice numbers atomically
+                try:
+                    inv_numbers = reserve_invoice_numbers(len(pending_records))
+                except Exception as e:
+                    st.error(f"Could not reserve invoice numbers: {e}")
+                    inv_numbers = []
+
+                if inv_numbers:
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+                    # Filter out old error records for pending creators so retries start fresh
+                    pending_names = {r.get("creator_name") for r in pending_records}
+                    new_results = [
+                        r for r in st.session_state.bulk_results
+                        if not (r.get("status") == "error" and r.get("creator_name") in pending_names)
+                    ]
+
+                    for idx, (rec, inv_no) in enumerate(zip(pending_records, inv_numbers)):
+                        creator_name = (rec.get("creator_name") or "").strip() or f"Creator_{idx+1}"
+                        status_text.text(f"⏳ Generating {idx+1}/{len(pending_records)}: {creator_name}...")
+
+                        try:
+                            # Normalize date
+                            raw_date = rec.get("invoice_date") or ""
+                            norm_date = normalize_date(raw_date)
+
+                            # Calculate totals
+                            totals = calculate_invoice_totals(
+                                float(rec.get("unit_price") or 0.0),
+                                int(rec.get("quantity") or 1),
+                                float(rec.get("discount") or 0.0),
+                            )
+
+                            # Match creator in DB if possible
+                            db_creator = database.find_creator_by_name(creator_name)
+                            creator_id = db_creator["id"] if db_creator else None
+
+                            creator_data = {
+                                "id": creator_id,
+                                "name": creator_name,
+                                "address": rec.get("address") or (db_creator or {}).get("address") or "Creator Address, India",
+                                "email": rec.get("email") or (db_creator or {}).get("email") or "",
+                                "phone": rec.get("phone") or (db_creator or {}).get("phone") or "",
+                                "pan": rec.get("pan") or (db_creator or {}).get("pan") or "",
+                                "upi_id": rec.get("upi_id") or (db_creator or {}).get("upi_id") or "",
+                                "bank_account": rec.get("bank_account") or (db_creator or {}).get("bank_account") or "",
+                                "ifsc": rec.get("ifsc") or (db_creator or {}).get("ifsc") or "",
+                                "account_holder": rec.get("account_holder") or (db_creator or {}).get("account_holder") or creator_name,
+                                "bank_name": rec.get("bank_name") or (db_creator or {}).get("bank_name") or "",
+                            }
+
+                            invoice_data = {
+                                "invoice_number": inv_no,
+                                "creator_id": creator_id,
+                                "creator_name": creator_name,
+                                "invoice_date": norm_date,
+                                "service_description": rec.get("service_description") or "Brand Collaboration Services",
+                                "quantity": totals["quantity"],
+                                "unit_price": totals["unit_price"],
+                                "taxable_value": totals["taxable_value"],
+                                "discount": totals["discount"],
+                                "subtotal_less_discount": totals["subtotal_less_discount"],
+                                "balance_due": totals["balance_due"],
+                                "video_link": rec.get("video_link") or "",
+                                "status": "Generated",
+                            }
+
+                            generated = invoice_service.generate_and_save_invoice(
+                                invoice_data=invoice_data,
+                                creator_data=creator_data,
+                            )
+
+                            new_results.append({"status": "success", "invoice": generated, "creator_name": creator_name})
+
+                        except Exception as exc:
+                            new_results.append({"status": "error", "creator_name": creator_name, "error": str(exc)})
+
+                        progress_bar.progress((idx + 1) / len(pending_records))
+
+                    st.session_state.bulk_results = new_results
+                    status_text.text("✅ Generation complete!")
+                    st.cache_data.clear()
+
+                    # Build ZIP archive from ALL successful invoices in this bulk session
+                    all_success = [r for r in new_results if r.get("status") == "success"]
+                    if all_success:
+                        zip_buffer = io.BytesIO()
+                        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+                            for res in all_success:
+                                inv = res.get("invoice", {})
+                                inv_no = inv.get("invoice_number", "INV")
+                                c_name = inv.get("creator_name", "Creator")
+                                clean = re.sub(r'[^a-zA-Z0-9_-]', '_', c_name).strip('_') or "Creator"
+                                xp = inv.get("excel_path")
+                                pp = inv.get("pdf_path")
+                                if xp and os.path.exists(xp):
+                                    with open(xp, "rb") as f:
+                                        zf.writestr(f"{clean}_Invoice_{inv_no}.xlsx", f.read())
+                                if pp and os.path.exists(pp):
+                                    with open(pp, "rb") as f:
+                                        zf.writestr(f"{clean}_Invoice_{inv_no}.pdf", f.read())
+                        st.session_state.bulk_zip_bytes = zip_buffer.getvalue()
+
+                    st.rerun()
+
+        # ---- ZIP Download ----
+        if st.session_state.bulk_zip_bytes:
+            st.markdown("---")
+            st.subheader("📥 Download All Invoices (ZIP)")
+            n_success = sum(1 for r in st.session_state.bulk_results if r["status"] == "success")
+            st.success(f"🎉 {n_success} invoice(s) generated successfully! Download the ZIP archive below.")
+            from datetime import datetime as _dt
+            zip_filename = f"Dermalist_Bulk_Invoices_{_dt.now().strftime('%Y%m%d_%H%M%S')}.zip"
+            st.download_button(
+                label=f"⬇️ Download ZIP — {zip_filename}",
+                data=st.session_state.bulk_zip_bytes,
+                file_name=zip_filename,
+                mime="application/zip",
+                use_container_width=True,
+                type="primary",
+                key="bulk_zip_download",
+            )
+
+    # ==================== SINGLE INVOICE DOWNLOAD SECTION ====================
     if st.session_state.last_generated_invoice:
+
         last_inv = st.session_state.last_generated_invoice
         st.markdown("---")
         st.subheader("📥 Download Generated Files")

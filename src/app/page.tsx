@@ -50,16 +50,30 @@ export default function StudioPage() {
     },
   });
 
-  // Fetch the next sequential invoice number on initial mount
-  useEffect(() => {
-    fetch("/api/invoices/next-number")
+  const [directoryCreators, setDirectoryCreators] = useState<CreatorProfile[]>([]);
+
+  const refreshDirectory = () => {
+    fetch("/api/creators?limit=100")
       .then((res) => res.json())
       .then((data) => {
-        if (data.nextInvoiceNumber) {
-          setInvoice((prev) => ({ ...prev, invoice_number: data.nextInvoiceNumber }));
-        }
+        if (data.creators) setDirectoryCreators(data.creators);
       })
-      .catch((err) => console.error("Error fetching next invoice number:", err));
+      .catch((err) => console.error("Error refreshing creators:", err));
+  };
+
+  // Parallel pre-fetch of next invoice number and creator directory on initial mount
+  useEffect(() => {
+    Promise.all([
+      fetch("/api/invoices/next-number").then((res) => res.json()).catch(() => ({})),
+      fetch("/api/creators?limit=100").then((res) => res.json()).catch(() => ({})),
+    ]).then(([numberData, creatorsData]) => {
+      if (numberData?.nextInvoiceNumber) {
+        setInvoice((prev) => ({ ...prev, invoice_number: numberData.nextInvoiceNumber }));
+      }
+      if (creatorsData?.creators) {
+        setDirectoryCreators(creatorsData.creators);
+      }
+    });
   }, []);
 
   const handleSelectCreator = (creator: CreatorProfile) => {
@@ -240,12 +254,14 @@ export default function StudioPage() {
                 currentInvoice={invoice}
                 onSelectCreator={handleSelectCreator}
                 onOpenImportModal={() => setImportModalOpen(true)}
+                availableCreators={directoryCreators}
               />
             ) : (
               <ManualInvoiceForm
                 invoice={invoice}
                 onChange={setInvoice}
                 onOpenImportModal={() => setImportModalOpen(true)}
+                availableCreators={directoryCreators}
               />
             )}
           </div>
@@ -298,6 +314,7 @@ export default function StudioPage() {
         isOpen={importModalOpen}
         onClose={() => setImportModalOpen(false)}
         onImportSuccess={() => {
+          refreshDirectory();
           handleSyncCreator();
         }}
       />

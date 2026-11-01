@@ -29,6 +29,7 @@ interface AIPromptStudioProps {
   currentInvoice: InvoiceDraft;
   onSelectCreator?: (creator: CreatorProfile) => void;
   onOpenImportModal?: () => void;
+  availableCreators?: CreatorProfile[];
 }
 
 const SAMPLE_PROMPTS = [
@@ -45,13 +46,21 @@ export function AIPromptStudio({
   currentInvoice,
   onSelectCreator,
   onOpenImportModal,
+  availableCreators,
 }: AIPromptStudioProps) {
   const [prompt, setPrompt] = useState("");
-  const [creatorsList, setCreatorsList] = useState<CreatorProfile[]>([]);
+  const [creatorsList, setCreatorsList] = useState<CreatorProfile[]>(availableCreators || []);
   const [creatorSearch, setCreatorSearch] = useState("");
   const [showPicker, setShowPicker] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const recognitionRef = useRef<any>(null);
+
+  // Sync when parent updates directory
+  useEffect(() => {
+    if (availableCreators && availableCreators.length > 0) {
+      setCreatorsList(availableCreators);
+    }
+  }, [availableCreators]);
 
   const toggleListening = () => {
     if (isListening) {
@@ -110,13 +119,14 @@ export function AIPromptStudio({
   };
 
   useEffect(() => {
+    if (availableCreators && availableCreators.length > 0) return;
     fetch("/api/creators?limit=100")
       .then((res) => res.json())
       .then((data) => {
         if (data.creators) setCreatorsList(data.creators);
       })
       .catch((err) => console.error("Error fetching creators for prompt studio:", err));
-  }, []);
+  }, [availableCreators]);
 
   const handleSelectCreator = (c: CreatorProfile) => {
     if (onSelectCreator) {
@@ -165,10 +175,16 @@ export function AIPromptStudio({
 
   const currentCreator = currentInvoice.creator;
 
-  const filteredCreators = creatorsList.filter((c) =>
-    c.name.toLowerCase().includes(creatorSearch.toLowerCase()) ||
-    (c.bank_name && c.bank_name.toLowerCase().includes(creatorSearch.toLowerCase()))
-  );
+  const filteredCreators = React.useMemo(() => {
+    if (!creatorSearch.trim()) return creatorsList;
+    const lower = creatorSearch.toLowerCase();
+    return creatorsList.filter(
+      (c) =>
+        c.name.toLowerCase().includes(lower) ||
+        (c.bank_name && c.bank_name.toLowerCase().includes(lower)) ||
+        (c.pan && c.pan.toLowerCase().includes(lower))
+    );
+  }, [creatorsList, creatorSearch]);
 
   return (
     <div className="space-y-4">

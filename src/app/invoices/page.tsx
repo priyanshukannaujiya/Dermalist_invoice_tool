@@ -22,13 +22,18 @@ export default function InvoicesArchivePage() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [total, setTotal] = useState(0);
   const [searchTerm, setSearchTerm] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [isSearching, setIsSearching] = useState(false);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
-  const loadInvoices = async () => {
+  // In-memory creator cache to prevent redundant HTTP lookups
+  const creatorCacheRef = React.useRef<Record<string, Partial<Creator>>>({});
+
+  const loadInvoices = async (term = searchTerm, isInitial = false) => {
     try {
-      setLoading(true);
-      const res = await fetch(`/api/invoices?search=${encodeURIComponent(searchTerm)}`);
+      if (isInitial) setInitialLoading(true);
+      else setIsSearching(true);
+      const res = await fetch(`/api/invoices?search=${encodeURIComponent(term)}&limit=100`);
       if (res.ok) {
         const data = await res.json();
         setInvoices(data.invoices || []);
@@ -37,38 +42,66 @@ export default function InvoicesArchivePage() {
     } catch (err) {
       toast.error("Failed to load invoice history.");
     } finally {
-      setLoading(false);
+      if (isInitial) setInitialLoading(false);
+      setIsSearching(false);
     }
   };
 
   useEffect(() => {
-    const timer = setTimeout(loadInvoices, 300);
+    loadInvoices("", true);
+  }, []);
+
+  useEffect(() => {
+    if (initialLoading) return;
+    const timer = setTimeout(() => {
+      loadInvoices(searchTerm, false);
+    }, 250);
     return () => clearTimeout(timer);
   }, [searchTerm]);
+
+  // Instant client-side search across loaded invoices
+  const displayedInvoices = React.useMemo(() => {
+    if (!searchTerm.trim()) return invoices;
+    const lower = searchTerm.toLowerCase();
+    return invoices.filter(
+      (inv) =>
+        inv.invoice_number.toLowerCase().includes(lower) ||
+        inv.creator_name.toLowerCase().includes(lower) ||
+        inv.service_description.toLowerCase().includes(lower) ||
+        inv.invoice_date.includes(lower)
+    );
+  }, [invoices, searchTerm]);
+
+  const resolveCreatorData = async (inv: Invoice): Promise<Partial<Creator>> => {
+    const cacheKey = inv.creator_id ? `id-${inv.creator_id}` : `name-${inv.creator_name}`;
+    if (creatorCacheRef.current[cacheKey]) {
+      return creatorCacheRef.current[cacheKey];
+    }
+
+    let creatorData: Partial<Creator> = { name: inv.creator_name };
+    try {
+      if (inv.creator_id) {
+        const cRes = await fetch(`/api/creators/${inv.creator_id}`);
+        if (cRes.ok) creatorData = await cRes.json();
+      } else if (inv.creator_name) {
+        const cRes = await fetch(`/api/creators?search=${encodeURIComponent(inv.creator_name)}&limit=1`);
+        if (cRes.ok) {
+          const cData = await cRes.json();
+          if (cData.creators?.[0]) creatorData = cData.creators[0];
+        }
+      }
+    } catch (e) {
+      // Ignore cache fetch error, fallback to creatorData
+    }
+
+    creatorCacheRef.current[cacheKey] = creatorData;
+    return creatorData;
+  };
 
   const handleDownloadExcel = async (inv: Invoice) => {
     try {
       setDownloadingId(`excel-${inv.id}`);
-
-      let creatorData: Partial<Creator> = {
-        name: inv.creator_name,
-      };
-
-      if (inv.creator_id) {
-        const cRes = await fetch(`/api/creators/${inv.creator_id}`);
-        if (cRes.ok) {
-          creatorData = await cRes.json();
-        }
-      }
-      if (!creatorData.bank_account && inv.creator_name) {
-        const cRes = await fetch(`/api/creators?search=${encodeURIComponent(inv.creator_name)}&limit=1`);
-        if (cRes.ok) {
-          const cData = await cRes.json();
-          if (cData.creators && cData.creators.length > 0) {
-            creatorData = cData.creators[0];
-          }
-        }
-      }
+      const creatorData = await resolveCreatorData(inv);
 
       const payload = {
         invoice_number: inv.invoice_number,
@@ -114,26 +147,7 @@ export default function InvoicesArchivePage() {
   const handleDownloadPdf = async (inv: Invoice) => {
     try {
       setDownloadingId(`pdf-${inv.id}`);
-
-      let creatorData: Partial<Creator> = {
-        name: inv.creator_name,
-      };
-
-      if (inv.creator_id) {
-        const cRes = await fetch(`/api/creators/${inv.creator_id}`);
-        if (cRes.ok) {
-          creatorData = await cRes.json();
-        }
-      }
-      if (!creatorData.bank_account && inv.creator_name) {
-        const cRes = await fetch(`/api/creators?search=${encodeURIComponent(inv.creator_name)}&limit=1`);
-        if (cRes.ok) {
-          const cData = await cRes.json();
-          if (cData.creators && cData.creators.length > 0) {
-            creatorData = cData.creators[0];
-          }
-        }
-      }
+      const creatorData = await resolveCreatorData(inv);
 
       const payload = {
         invoice_number: inv.invoice_number,
@@ -221,13 +235,17 @@ export default function InvoicesArchivePage() {
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               placeholder="Search by invoice number, creator name, or service..."
-              className="w-full text-xs rounded-lg border border-slate-200 pl-8 pr-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-slate-900"
+              className="w-full text-xs rounded-lg border border-slate-200 pl-8 pr-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-slate-900 transition-colors"
             />
-            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2" />
+            {isSearching ? (
+              <Loader2 className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2 animate-spin" />
+            ) : (
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2" />
+            )}
           </div>
 
           <div className="text-xs text-slate-500 font-mono text-[11px]">
-            Showing {invoices.length} of {total}
+            Showing {displayedInvoices.length} of {total}
           </div>
         </div>
 
@@ -246,23 +264,39 @@ export default function InvoicesArchivePage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {loading ? (
-                  <tr>
-                    <td colSpan={6} className="py-12 text-center text-slate-400">
-                      <div className="flex flex-col items-center justify-center gap-2">
-                        <Loader2 className="w-6 h-6 animate-spin text-emerald-600" />
-                        <span>Loading invoice archive...</span>
-                      </div>
-                    </td>
-                  </tr>
-                ) : invoices.length === 0 ? (
+                {initialLoading ? (
+                  Array.from({ length: 6 }).map((_, i) => (
+                    <tr key={i} className="animate-pulse">
+                      <td className="py-3.5 px-4">
+                        <div className="h-5 bg-slate-200 rounded w-20 skeleton-shimmer" />
+                      </td>
+                      <td className="py-3.5 px-4">
+                        <div className="h-4 bg-slate-200 rounded w-32 mb-1 skeleton-shimmer" />
+                        <div className="h-3 bg-slate-100 rounded w-24 skeleton-shimmer" />
+                      </td>
+                      <td className="py-3.5 px-4">
+                        <div className="h-4 bg-slate-200 rounded w-44 mb-1 skeleton-shimmer" />
+                        <div className="h-3 bg-slate-100 rounded w-16 skeleton-shimmer" />
+                      </td>
+                      <td className="py-3.5 px-4">
+                        <div className="h-4 bg-slate-200 rounded w-24 skeleton-shimmer" />
+                      </td>
+                      <td className="py-3.5 px-4 text-right">
+                        <div className="h-5 bg-slate-200 rounded w-20 ml-auto skeleton-shimmer" />
+                      </td>
+                      <td className="py-3.5 px-4 text-right">
+                        <div className="h-7 bg-slate-100 rounded w-28 ml-auto skeleton-shimmer" />
+                      </td>
+                    </tr>
+                  ))
+                ) : displayedInvoices.length === 0 ? (
                   <tr>
                     <td colSpan={6} className="py-12 text-center text-slate-400">
                       No invoices found. Generate an invoice in the AI Studio to populate this archive.
                     </td>
                   </tr>
                 ) : (
-                  invoices.map((inv) => (
+                  displayedInvoices.map((inv) => (
                     <tr key={inv.id} className="hover:bg-slate-50/80 transition-colors">
                       {/* Invoice No */}
                       <td className="py-3.5 px-4 align-top">

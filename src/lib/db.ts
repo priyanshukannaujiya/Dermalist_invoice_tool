@@ -78,76 +78,91 @@ export function getPool(): Pool {
 }
 
 let isInitialized = false;
+let initPromise: Promise<void> | null = null;
 
 export async function initDatabase(): Promise<void> {
   if (isInitialized) return;
   if (!getDatabaseUrl()) return;
-  const pool = getPool();
-  try {
-    // 1. Ensure creators table exists with all required fields
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS creators (
-        id SERIAL PRIMARY KEY,
-        name TEXT NOT NULL,
-        address TEXT,
-        email TEXT,
-        phone TEXT,
-        pan TEXT,
-        upi_id TEXT,
-        bank_account TEXT,
-        ifsc TEXT,
-        account_holder TEXT,
-        bank_name TEXT,
-        is_msme BOOLEAN DEFAULT FALSE,
-        msme_registration_no TEXT,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-      );
-    `);
 
-    // Ensure missing columns exist in case table was created from an older schema
-    await pool.query(`
-      ALTER TABLE creators ADD COLUMN IF NOT EXISTS is_msme BOOLEAN DEFAULT FALSE;
-      ALTER TABLE creators ADD COLUMN IF NOT EXISTS msme_registration_no TEXT;
-      ALTER TABLE creators ALTER COLUMN created_at SET DEFAULT NOW();
-      ALTER TABLE creators ALTER COLUMN updated_at SET DEFAULT NOW();
-    `);
+  if (!initPromise) {
+    initPromise = (async () => {
+      const pool = getPool();
+      try {
+        // 1. Ensure creators table exists with all required fields
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS creators (
+            id SERIAL PRIMARY KEY,
+            name TEXT NOT NULL,
+            address TEXT,
+            email TEXT,
+            phone TEXT,
+            pan TEXT,
+            upi_id TEXT,
+            bank_account TEXT,
+            ifsc TEXT,
+            account_holder TEXT,
+            bank_name TEXT,
+            is_msme BOOLEAN DEFAULT FALSE,
+            msme_registration_no TEXT,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+          );
+        `);
 
-    // 2. Ensure invoices table exists
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS invoices (
-        id SERIAL PRIMARY KEY,
-        invoice_number TEXT UNIQUE NOT NULL,
-        creator_id INTEGER REFERENCES creators(id) ON DELETE SET NULL,
-        creator_name TEXT,
-        invoice_date TEXT,
-        service_description TEXT,
-        quantity INTEGER DEFAULT 1,
-        unit_price NUMERIC(10,2) DEFAULT 0,
-        taxable_value NUMERIC(10,2) DEFAULT 0,
-        discount NUMERIC(10,2) DEFAULT 0,
-        subtotal_less_discount NUMERIC(10,2) DEFAULT 0,
-        balance_due NUMERIC(10,2) DEFAULT 0,
-        payment_terms TEXT DEFAULT 'Bank Transfer Or UPICode',
-        video_link TEXT,
-        status TEXT DEFAULT 'Generated',
-        excel_path TEXT,
-        pdf_path TEXT,
-        raw_prompt TEXT,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-      );
-    `);
+        // Ensure missing columns exist in case table was created from an older schema
+        await pool.query(`
+          ALTER TABLE creators ADD COLUMN IF NOT EXISTS is_msme BOOLEAN DEFAULT FALSE;
+          ALTER TABLE creators ADD COLUMN IF NOT EXISTS msme_registration_no TEXT;
+          ALTER TABLE creators ALTER COLUMN created_at SET DEFAULT NOW();
+          ALTER TABLE creators ALTER COLUMN updated_at SET DEFAULT NOW();
+        `);
 
-    await pool.query(`
-      ALTER TABLE invoices ADD COLUMN IF NOT EXISTS payment_terms TEXT DEFAULT 'Bank Transfer Or UPICode';
-      ALTER TABLE invoices ADD COLUMN IF NOT EXISTS raw_prompt TEXT;
-    `);
+        // 2. Ensure invoices table exists
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS invoices (
+            id SERIAL PRIMARY KEY,
+            invoice_number TEXT UNIQUE NOT NULL,
+            creator_id INTEGER REFERENCES creators(id) ON DELETE SET NULL,
+            creator_name TEXT,
+            invoice_date TEXT,
+            service_description TEXT,
+            quantity INTEGER DEFAULT 1,
+            unit_price NUMERIC(10,2) DEFAULT 0,
+            taxable_value NUMERIC(10,2) DEFAULT 0,
+            discount NUMERIC(10,2) DEFAULT 0,
+            subtotal_less_discount NUMERIC(10,2) DEFAULT 0,
+            balance_due NUMERIC(10,2) DEFAULT 0,
+            payment_terms TEXT DEFAULT 'Bank Transfer Or UPICode',
+            video_link TEXT,
+            status TEXT DEFAULT 'Generated',
+            excel_path TEXT,
+            pdf_path TEXT,
+            raw_prompt TEXT,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+          );
+        `);
 
-    isInitialized = true;
-  } catch (err) {
-    console.error("Database initialization notice:", err);
+        await pool.query(`
+          ALTER TABLE invoices ADD COLUMN IF NOT EXISTS payment_terms TEXT DEFAULT 'Bank Transfer Or UPICode';
+          ALTER TABLE invoices ADD COLUMN IF NOT EXISTS raw_prompt TEXT;
+        `);
+
+        // 3. Performance Indexes for instant B-tree lookups
+        await pool.query(`
+          CREATE INDEX IF NOT EXISTS idx_creators_name_lower ON creators (LOWER(TRIM(name)));
+          CREATE INDEX IF NOT EXISTS idx_creators_pan ON creators (UPPER(TRIM(pan)));
+          CREATE INDEX IF NOT EXISTS idx_invoices_number ON invoices (invoice_number);
+          CREATE INDEX IF NOT EXISTS idx_invoices_id_desc ON invoices (id DESC);
+        `);
+
+        isInitialized = true;
+      } catch (err) {
+        console.error("Database initialization notice:", err);
+      }
+    })();
   }
+  await initPromise;
 }
 
 // Helper query function with auto-init
@@ -185,9 +200,6 @@ export async function getCreators(options?: {
   }
 
   const countQuery = `SELECT COUNT(*) as count FROM creators ${whereClause}`;
-  const countRes = await pool.query(countQuery, params);
-  const total = parseInt(countRes.rows[0]?.count || "0", 10);
-
   const queryParams = [...params, limit, offset];
   const listQuery = `
     SELECT * FROM creators 
@@ -195,8 +207,14 @@ export async function getCreators(options?: {
     ORDER BY ${sortByCol} ${sortOrder} 
     LIMIT $${queryParams.length - 1} OFFSET $${queryParams.length}
   `;
-  const listRes = await pool.query(listQuery, queryParams);
 
+  // Parallelize count and list queries to cut latency in half
+  const [countRes, listRes] = await Promise.all([
+    pool.query(countQuery, params),
+    pool.query(listQuery, queryParams),
+  ]);
+
+  const total = parseInt(countRes.rows[0]?.count || "0", 10);
   return { creators: listRes.rows, total };
 }
 
@@ -209,21 +227,20 @@ export async function findCreatorByName(name: string): Promise<Creator | null> {
   const trimmed = name?.trim();
   if (!trimmed) return null;
 
-  // 1. Try exact case-insensitive match
-  const exact = await query<Creator>(
-    "SELECT * FROM creators WHERE LOWER(TRIM(name)) = LOWER($1) LIMIT 1",
+  // 1. Single roundtrip fast match: Exact Name OR PAN
+  const fastMatches = await query<Creator>(
+    `SELECT * FROM creators 
+     WHERE LOWER(TRIM(name)) = LOWER($1) 
+        OR (pan IS NOT NULL AND UPPER(TRIM(pan)) = UPPER($1))
+     ORDER BY 
+       CASE 
+         WHEN LOWER(TRIM(name)) = LOWER($1) THEN 1 
+         ELSE 2 
+       END ASC
+     LIMIT 1`,
     [trimmed]
   );
-  if (exact.length > 0) return exact[0];
-
-  // 2. Try match by PAN if input looks like a PAN
-  if (/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/i.test(trimmed)) {
-    const panMatch = await query<Creator>(
-      "SELECT * FROM creators WHERE UPPER(TRIM(pan)) = UPPER($1) LIMIT 1",
-      [trimmed]
-    );
-    if (panMatch.length > 0) return panMatch[0];
-  }
+  if (fastMatches.length > 0) return fastMatches[0];
 
   // 3. Extract meaningful words (filtering out common prefixes/honorifics)
   // Strip out special regex characters to safely pass into Postgres regex
@@ -466,18 +483,22 @@ export async function getInvoices(options?: {
 
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
-  const countRes = await pool.query(`SELECT COUNT(*) as count FROM invoices ${whereClause}`, params);
-  const total = parseInt(countRes.rows[0]?.count || "0", 10);
-
+  const countQuery = `SELECT COUNT(*) as count FROM invoices ${whereClause}`;
   const queryParams = [...params, limit, offset];
-  const listRes = await pool.query(
-    `SELECT * FROM invoices 
+  const listQuery = `
+    SELECT * FROM invoices 
      ${whereClause} 
      ORDER BY id DESC 
-     LIMIT $${queryParams.length - 1} OFFSET $${queryParams.length}`,
-    queryParams
-  );
+     LIMIT $${queryParams.length - 1} OFFSET $${queryParams.length}
+  `;
 
+  // Parallelize count and list queries
+  const [countRes, listRes] = await Promise.all([
+    pool.query(countQuery, params),
+    pool.query(listQuery, queryParams),
+  ]);
+
+  const total = parseInt(countRes.rows[0]?.count || "0", 10);
   return { invoices: listRes.rows, total };
 }
 

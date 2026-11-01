@@ -159,3 +159,145 @@ def validate_creator_payload(data: Dict[str, Any]) -> Tuple[bool, List[str]]:
         errors.append("Email address is not in a valid format.")
 
     return len(errors) == 0, errors
+
+
+# ==================== BULK INVOICE VALIDATION ====================
+
+from typing import Optional as _Opt  # avoid re-importing at top level
+
+try:
+    from pydantic import BaseModel, field_validator, model_validator
+    _PYDANTIC_AVAILABLE = True
+except ImportError:
+    _PYDANTIC_AVAILABLE = False
+
+
+if _PYDANTIC_AVAILABLE:
+    class BulkCreatorRecord(BaseModel):
+        """Pydantic model for per-row validation of bulk invoice records."""
+        creator_name: _Opt[str] = None
+        address: _Opt[str] = None
+        email: _Opt[str] = None
+        phone: _Opt[str] = None
+        pan: _Opt[str] = None
+        upi_id: _Opt[str] = None
+        bank_account: _Opt[str] = None
+        ifsc: _Opt[str] = None
+        account_holder: _Opt[str] = None
+        bank_name: _Opt[str] = None
+        invoice_date: _Opt[str] = None
+        service_description: _Opt[str] = None
+        quantity: int = 1
+        unit_price: float = 0.0
+        discount: float = 0.0
+        video_link: _Opt[str] = None
+
+        @field_validator("pan", mode="before")
+        @classmethod
+        def validate_pan_field(cls, v):
+            if v and isinstance(v, str) and v.strip():
+                if not PAN_REGEX.match(v.strip()):
+                    raise ValueError(f"Invalid PAN format: '{v}'. Expected 5 letters, 4 digits, 1 letter (e.g. ABCDE1234F).")
+                return v.strip().upper()
+            return v
+
+        @field_validator("ifsc", mode="before")
+        @classmethod
+        def validate_ifsc_field(cls, v):
+            if v and isinstance(v, str) and v.strip():
+                if not IFSC_REGEX.match(v.strip()):
+                    raise ValueError(f"Invalid IFSC format: '{v}'. Expected 4 letters + 0 + 6 chars (e.g. HDFC0000123).")
+                return v.strip().upper()
+            return v
+
+        @field_validator("email", mode="before")
+        @classmethod
+        def validate_email_field(cls, v):
+            if v and isinstance(v, str) and v.strip():
+                if not EMAIL_REGEX.match(v.strip()):
+                    raise ValueError(f"Invalid email format: '{v}'.")
+                return v.strip()
+            return v
+
+        @field_validator("quantity", mode="before")
+        @classmethod
+        def coerce_quantity(cls, v):
+            try:
+                return max(1, int(v))
+            except (TypeError, ValueError):
+                return 1
+
+        @field_validator("unit_price", "discount", mode="before")
+        @classmethod
+        def coerce_float(cls, v):
+            try:
+                return max(0.0, float(v or 0.0))
+            except (TypeError, ValueError):
+                return 0.0
+
+
+def validate_bulk_records(records: list) -> list:
+    """
+    Validate a list of extracted creator invoice records.
+    Returns annotated list with per-record 'validation_errors' and 'is_valid' keys.
+    Missing fields are flagged: name, price, service, PAN format, IFSC format.
+    """
+    annotated = []
+    for i, rec in enumerate(records):
+        errors = []
+        field_flags = {}
+
+        # Required field checks
+        if not rec.get("creator_name"):
+            errors.append("Creator name is missing.")
+            field_flags["creator_name"] = "missing"
+
+        unit_price = 0.0
+        try:
+            unit_price = float(rec.get("unit_price") or 0.0)
+        except (TypeError, ValueError):
+            pass
+        if unit_price <= 0:
+            errors.append("Invoice amount (unit_price) is missing or zero.")
+            field_flags["unit_price"] = "missing"
+
+        if not rec.get("service_description"):
+            errors.append("Service description is missing.")
+            field_flags["service_description"] = "missing"
+
+        # Optional but validated when present
+        pan = (rec.get("pan") or "").strip()
+        if pan and not PAN_REGEX.match(pan):
+            errors.append(f"Invalid PAN format: '{pan}'.")
+            field_flags["pan"] = "invalid"
+
+        ifsc = (rec.get("ifsc") or "").strip()
+        if ifsc and not IFSC_REGEX.match(ifsc):
+            errors.append(f"Invalid IFSC format: '{ifsc}'.")
+            field_flags["ifsc"] = "invalid"
+
+        email = (rec.get("email") or "").strip()
+        if email and not EMAIL_REGEX.match(email):
+            errors.append(f"Invalid email: '{email}'.")
+            field_flags["email"] = "invalid"
+
+        # Payment method check (warn, not block)
+        has_payment = bool(
+            (rec.get("bank_account") or "").strip()
+            or (rec.get("upi_id") or "").strip()
+        )
+        warnings = []
+        if not has_payment:
+            field_flags["payment"] = "missing"
+            warnings.append("Missing payment info (Bank A/C or UPI)")
+
+        annotated.append({
+            **rec,
+            "row_index": i,
+            "validation_errors": errors,
+            "validation_warnings": warnings,
+            "field_flags": field_flags,
+            "is_valid": len(errors) == 0,
+        })
+
+    return annotated

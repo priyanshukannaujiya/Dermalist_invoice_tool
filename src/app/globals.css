@@ -54,19 +54,28 @@ body {
   background: hsl(var(--background));
   font-family: var(--font-inter), system-ui, -apple-system, sans-serif;
   min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
-/* Custom scrollbars */
+/* Smooth Scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Custom scrollbars - smoother and sleeker */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.4);
+  background: rgba(148, 163, 184, 0.35);
   border-radius: 9999px;
+  transition: background-color 0.2s ease;
 }
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(100, 116, 139, 0.6);
@@ -78,4 +87,34 @@ body {
   background-image: 
     linear-gradient(to right, rgba(148, 163, 184, 0.07) 1px, transparent 1px),
     linear-gradient(to bottom, rgba(148, 163, 184, 0.07) 1px, transparent 1px);
+}
+
+/* Hardware accelerated transitions & button micro-interactions */
+.btn-smooth {
+  transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: transform;
+}
+.btn-smooth:active {
+  transform: scale(0.98);
+}
+
+/* Buttery Skeleton Loading Animation */
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.skeleton-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(241, 245, 249, 0.8) 25%,
+    rgba(226, 232, 240, 0.9) 37%,
+    rgba(241, 245, 249, 0.8) 63%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
 }

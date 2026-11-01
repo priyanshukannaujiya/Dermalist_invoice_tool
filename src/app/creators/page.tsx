@@ -31,7 +31,8 @@ export default function CreatorsPage() {
   const [creators, setCreators] = useState<Creator[]>([]);
   const [total, setTotal] = useState(0);
   const [searchTerm, setSearchTerm] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [isSearching, setIsSearching] = useState(false);
   const [revealedBanks, setRevealedBanks] = useState<Record<number, boolean>>({});
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
@@ -55,10 +56,11 @@ export default function CreatorsPage() {
     msme_registration_no: "",
   });
 
-  const loadCreators = async () => {
+  const loadCreators = async (term = searchTerm, isInitial = false) => {
     try {
-      setLoading(true);
-      const res = await fetch(`/api/creators?search=${encodeURIComponent(searchTerm)}`);
+      if (isInitial) setInitialLoading(true);
+      else setIsSearching(true);
+      const res = await fetch(`/api/creators?search=${encodeURIComponent(term)}&limit=100`);
       if (res.ok) {
         const data = await res.json();
         setCreators(data.creators || []);
@@ -67,14 +69,37 @@ export default function CreatorsPage() {
     } catch (err) {
       toast.error("Failed to load creator directory.");
     } finally {
-      setLoading(false);
+      if (isInitial) setInitialLoading(false);
+      setIsSearching(false);
     }
   };
 
   useEffect(() => {
-    const timer = setTimeout(loadCreators, 300);
+    loadCreators("", true);
+  }, []);
+
+  useEffect(() => {
+    if (initialLoading) return;
+    const timer = setTimeout(() => {
+      loadCreators(searchTerm, false);
+    }, 250);
     return () => clearTimeout(timer);
   }, [searchTerm]);
+
+  // Instant in-memory search across currently loaded creators
+  const displayedCreators = React.useMemo(() => {
+    if (!searchTerm.trim()) return creators;
+    const lower = searchTerm.toLowerCase();
+    return creators.filter(
+      (c) =>
+        c.name.toLowerCase().includes(lower) ||
+        (c.pan && c.pan.toLowerCase().includes(lower)) ||
+        (c.bank_name && c.bank_name.toLowerCase().includes(lower)) ||
+        (c.ifsc && c.ifsc.toLowerCase().includes(lower)) ||
+        (c.email && c.email.toLowerCase().includes(lower)) ||
+        (c.phone && c.phone.includes(lower))
+    );
+  }, [creators, searchTerm]);
 
   const toggleRevealBank = (id: number) => {
     setRevealedBanks((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -256,13 +281,17 @@ export default function CreatorsPage() {
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               placeholder="Filter by creator name, PAN, bank name, IFSC..."
-              className="w-full text-xs rounded-lg border border-slate-200 pl-8 pr-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-slate-900"
+              className="w-full text-xs rounded-lg border border-slate-200 pl-8 pr-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-slate-900 transition-colors"
             />
-            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2" />
+            {isSearching ? (
+              <Loader2 className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2 animate-spin" />
+            ) : (
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2" />
+            )}
           </div>
 
           <div className="text-xs text-slate-500 font-mono text-[11px]">
-            Showing {creators.length} of {total}
+            Showing {displayedCreators.length} of {total}
           </div>
         </div>
 
@@ -280,23 +309,38 @@ export default function CreatorsPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {loading ? (
+                {initialLoading ? (
+                  Array.from({ length: 6 }).map((_, i) => (
+                    <tr key={i} className="animate-pulse">
+                      <td className="py-3.5 px-4">
+                        <div className="h-4 bg-slate-200 rounded w-32 mb-1.5 skeleton-shimmer" />
+                        <div className="h-3 bg-slate-100 rounded w-48 skeleton-shimmer" />
+                      </td>
+                      <td className="py-3.5 px-4">
+                        <div className="h-4 bg-slate-200 rounded w-24 mb-1 skeleton-shimmer" />
+                        <div className="h-3 bg-slate-100 rounded w-16 skeleton-shimmer" />
+                      </td>
+                      <td className="py-3.5 px-4">
+                        <div className="h-4 bg-slate-200 rounded w-36 mb-1 skeleton-shimmer" />
+                        <div className="h-3 bg-slate-100 rounded w-28 skeleton-shimmer" />
+                      </td>
+                      <td className="py-3.5 px-4">
+                        <div className="h-4 bg-slate-200 rounded w-28 mb-1 skeleton-shimmer" />
+                        <div className="h-3 bg-slate-100 rounded w-24 skeleton-shimmer" />
+                      </td>
+                      <td className="py-3.5 px-4 text-right">
+                        <div className="h-6 bg-slate-100 rounded w-16 ml-auto skeleton-shimmer" />
+                      </td>
+                    </tr>
+                  ))
+                ) : displayedCreators.length === 0 ? (
                   <tr>
                     <td colSpan={5} className="py-12 text-center text-slate-400">
-                      <div className="flex flex-col items-center justify-center gap-2">
-                        <Loader2 className="w-6 h-6 animate-spin text-emerald-600" />
-                        <span>Loading creators from Neon PostgreSQL...</span>
-                      </div>
-                    </td>
-                  </tr>
-                ) : creators.length === 0 ? (
-                  <tr>
-                    <td colSpan={5} className="py-12 text-center text-slate-400">
-                      No creators found matching &ldquo;{searchTerm}&rdquo;. Click &ldquo;Add New Creator&rdquo; to create one.
+                      No creators found matching &ldquo;{searchTerm}&rdquo;. Click &ldquo;Add Creator&rdquo; to create one.
                     </td>
                   </tr>
                 ) : (
-                  creators.map((c) => {
+                  displayedCreators.map((c) => {
                     const isRevealed = Boolean(revealedBanks[c.id]);
                     return (
                       <tr key={c.id} className="hover:bg-slate-50/80 transition-colors">

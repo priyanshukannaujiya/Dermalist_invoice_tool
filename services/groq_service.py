@@ -25,6 +25,44 @@ FALLBACK_MODELS = [
 
 _CACHED_GROQ_CLIENT = None
 
+BULK_SYSTEM_PROMPT = """
+You are an expert AI Invoice Assistant for Dermalist creator billing.
+The user will provide details for MULTIPLE creators in one message.
+Your task is to extract each creator's invoice data into a JSON array.
+
+Output ONLY a valid JSON object in this exact format:
+{
+  "records": [
+    {
+      "creator_name": string or null,
+      "address": string or null,
+      "email": string or null,
+      "phone": string or null,
+      "invoice_date": string or null,
+      "service_description": string or null,
+      "quantity": integer (default 1),
+      "unit_price": float or null,
+      "discount": float (default 0.0),
+      "video_link": string or null,
+      "is_complete": boolean,
+      "missing_fields": list of strings,
+      "bot_reply": string
+    },
+    ...
+  ],
+  "summary": string (brief overall summary of what was extracted)
+}
+
+Rules:
+1. Extract ALL creators mentioned. Support 1–10 creators per message.
+2. DO NOT invent names or prices not mentioned.
+3. Parse rupee amounts: ₹2,500 → 2500, 2.5k → 2500, Rs 3000 → 3000.
+4. DO NOT include PAN numbers, bank account numbers, IFSC codes, or UPI IDs in output. These are extracted locally on the server.
+5. If quantity is mentioned (e.g. "2 reels"), parse as integer.
+6. Mark is_complete=true only when creator_name, unit_price, and service_description are all present.
+7. Output raw JSON only — no markdown, no explanation text.
+"""
+
 SYSTEM_PROMPT = """
 You are an expert AI Invoice Assistant specialized in extracting invoice details for creators and influencers.
 Your task is to analyze user prompts requesting invoice generation and extract the required fields into a clean JSON structure.
@@ -241,6 +279,84 @@ class GroqService:
     def format_account_details_card(creator: Dict[str, Any]) -> str:
         return format_account_details_card(creator)
 
+    def parse_bulk_invoice_request(
+        self, user_prompt: str, chat_history: Optional[List[Dict[str, str]]] = None
+    ) -> Dict[str, Any]:
+        """
+        Parse a prompt that may contain multiple creator invoice records.
+        Returns {"records": [...], "summary": str} or {"error": str}.
+        Sensitive fields (PAN, bank account, IFSC, UPI) are extracted locally
+        from the raw prompt BEFORE sending to Groq and overlaid afterwards.
+        """
+        if not self.api_key or not self.client:
+            return {
+                "error": "Groq API Key is not configured.",
+                "records": [],
+                "summary": "",
+            }
+
+        # 1. Extract sensitive credentials locally — never sent to Groq
+        local_creds_per_block = _extract_bulk_local_credentials(user_prompt)
+
+        messages = [{"role": "system", "content": BULK_SYSTEM_PROMPT}]
+        if chat_history:
+            for msg in chat_history[-4:]:
+                messages.append({"role": msg["role"], "content": msg["content"]})
+        messages.append({"role": "user", "content": user_prompt})
+
+        models_to_try = [self.primary_model] + [m for m in FALLBACK_MODELS if m != self.primary_model]
+        last_error = None
+        raw_content = ""
+
+        for model_name in models_to_try:
+            try:
+                response = self.client.chat.completions.create(
+                    model=model_name,
+                    messages=messages,
+                    temperature=0.1,
+                    max_tokens=1500,
+                )
+                raw_content = response.choices[0].message.content.strip()
+                if raw_content:
+                    break
+            except Exception as e:
+                last_error = e
+                continue
+
+        if not raw_content:
+            return {
+                "error": f"Groq API Error: {str(last_error)}",
+                "records": [],
+                "summary": "Could not reach Groq model.",
+            }
+
+        parsed = self._extract_json(raw_content)
+        if not parsed:
+            return {"error": "Could not parse LLM response as JSON.", "records": [], "summary": ""}
+
+        raw_records = parsed.get("records", [])
+        if not isinstance(raw_records, list):
+            raw_records = []
+
+        # Locally extract credentials accurately aligned to each creator
+        local_creds = _extract_credentials_for_records(user_prompt, raw_records)
+
+        cleaned_records = []
+        for i, rec in enumerate(raw_records):
+            cleaned = self._clean_llm_result(rec)
+            # Overlay locally extracted credentials for the i-th creator
+            if i < len(local_creds):
+                lc = local_creds[i]
+                for field in ["pan", "bank_account", "ifsc", "upi_id"]:
+                    if lc.get(field):
+                        cleaned[field] = lc[field]
+            cleaned_records.append(cleaned)
+
+        return {
+            "records": cleaned_records,
+            "summary": parsed.get("summary", f"Extracted {len(cleaned_records)} creator invoice record(s)."),
+        }
+
 
 def is_account_query(prompt: str) -> Tuple[bool, Optional[str]]:
     """
@@ -333,3 +449,123 @@ def format_account_details_card(creator: Dict[str, Any]) -> str:
         f"- **Address:** {address}\n\n"
         f"💡 *To generate an invoice for this creator, type:* `Generate invoice for {creator['name']} for ₹[amount] for [service]`"
     )
+
+
+def _extract_single_local_credentials(block: str) -> Dict[str, Optional[str]]:
+    """
+    Extract sensitive fields (PAN, IFSC, bank account, UPI) from a single text block.
+    These are NEVER sent to Groq/LLM.
+    """
+    # PAN: 5 uppercase letters, 4 digits, 1 uppercase letter
+    pan_match = re.search(r'\b([A-Z]{5}[0-9]{4}[A-Z])\b', block, re.IGNORECASE)
+    pan = pan_match.group(1).upper() if pan_match else None
+
+    # IFSC: 4 letters, 0, 6 alphanumeric characters
+    ifsc_match = re.search(
+        r'(?:ifsc(?:\s*code)?)\s*[:\-=]?\s*([A-Z]{4}0[A-Z0-9]{6})\b|'
+        r'\b([A-Z]{4}0[A-Z0-9]{6})\b',
+        block, re.IGNORECASE
+    )
+    ifsc = None
+    if ifsc_match:
+        ifsc = (ifsc_match.group(1) or ifsc_match.group(2) or "").upper() or None
+
+    # Bank account: labeled first, then 11–18 digit standalone
+    acc_match = re.search(
+        r'(?:bank\s*a[/]?c|account(?:\s*no)?|a[/]c\s*no)\s*[:\-=]?\s*(\d{9,18})\b',
+        block, re.IGNORECASE
+    )
+    bank_account = acc_match.group(1) if acc_match else None
+    if not bank_account:
+        standalone = re.findall(r'\b(\d{11,18})\b', block)
+        if standalone:
+            bank_account = standalone[0]
+
+    # UPI: explicit label first, then pattern
+    upi_match = re.search(
+        r'(?:upi\s*(?:id)?|vpa)\s*[:\-=]?\s*([\w.\-_]{2,}@[\w]{2,})\b',
+        block, re.IGNORECASE
+    )
+    upi_id = upi_match.group(1) if upi_match else None
+    if not upi_id:
+        generic = re.search(r'\b([\w.\-_]{2,}@[\w]{2,})\b', block)
+        if generic and '@' in generic.group(1):
+            candidate = generic.group(1)
+            # Not a standard email domain (avoids gmail.com etc.)
+            after = block[block.find(candidate) + len(candidate):]
+            if not re.match(r'^\.[a-zA-Z]{2,}', after):
+                upi_id = candidate
+
+    return {"pan": pan, "ifsc": ifsc, "bank_account": bank_account, "upi_id": upi_id}
+
+
+def _extract_credentials_for_records(
+    prompt: str, raw_records: List[Dict[str, Any]]
+) -> List[Dict[str, Optional[str]]]:
+    """
+    Extract sensitive credentials (PAN, IFSC, bank account, UPI) locally per creator.
+    These are NEVER sent to Groq/LLM.
+    Uses precise name-based segmentation across the prompt so each creator receives
+    their own credentials even if there are preamble or summary lines.
+    """
+    if not raw_records:
+        return _extract_bulk_local_credentials(prompt)
+
+    # 1. Locate each creator's appearance in the prompt
+    positions = []
+    for rec in raw_records:
+        name = (rec.get("creator_name") or "").strip()
+        pos = -1
+        if name:
+            m = re.search(re.escape(name), prompt, re.IGNORECASE)
+            if not m:
+                words = name.split()
+                if words:
+                    m = re.search(r'\b' + re.escape(words[0]) + r'\b', prompt, re.IGNORECASE)
+            if m:
+                pos = m.start()
+        positions.append(pos)
+
+    # If all positions are found and in ascending order, slice by segments
+    valid_positions = [p for p in positions if p >= 0]
+    if len(valid_positions) == len(raw_records) and sorted(valid_positions) == valid_positions:
+        results = []
+        for i, pos in enumerate(positions):
+            start = pos
+            end = positions[i + 1] if i + 1 < len(positions) else len(prompt)
+            seg = prompt[start:end]
+            results.append(_extract_single_local_credentials(seg))
+        return results
+
+    # 2. Fallback: block-based segmentation with preamble filtering
+    return _extract_bulk_local_credentials(prompt)
+
+
+def _extract_bulk_local_credentials(prompt: str) -> List[Dict[str, Optional[str]]]:
+    """
+    Split a multi-creator prompt into per-creator blocks and extract sensitive
+    credentials from each block individually.
+    Returns a list of credential dicts aligned to the order creators appear.
+    """
+    blocks = re.split(
+        r'\n\s*[-—]{3,}\s*\n'       # --- or —— dividers
+        r'|\n\s*\n\s*(?=\d+[\.\)])'  # blank line before numbered item
+        r'|\n(?=\d+[\.\)]\s)'        # newline before numbered item
+        r'|\n\s*\n(?=[A-Z][a-z]+\s+[A-Z])',  # blank line before capitalized name
+        prompt
+    )
+
+    # Filter out preamble blocks without digits, currency or keywords
+    clean_blocks = []
+    for b in blocks:
+        b_str = b.strip()
+        if not b_str:
+            continue
+        has_content = bool(re.search(r'\d|₹|rs|pan|ifsc|upi|reel|video|inr', b_str, re.IGNORECASE))
+        if has_content:
+            clean_blocks.append(b_str)
+
+    if not clean_blocks:
+        return [_extract_single_local_credentials(prompt)]
+
+    return [_extract_single_local_credentials(b) for b in clean_blocks]
