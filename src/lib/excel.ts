@@ -121,7 +121,7 @@ export async function generateInvoiceExcelBuffer(data: InvoiceExcelPayload): Pro
   }
 
   if (cachedTemplateBuffer) {
-    await workbook.xlsx.load(cachedTemplateBuffer);
+    await workbook.xlsx.load(cachedTemplateBuffer as any);
     workbook.calcProperties.fullCalcOnLoad = true;
     const ws = workbook.worksheets[0];
 
